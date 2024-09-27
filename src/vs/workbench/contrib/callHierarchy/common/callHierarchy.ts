@@ -3,20 +3,20 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IRange } from 'vs/editor/common/core/range';
-import { SymbolKind, ProviderResult, SymbolTag } from 'vs/editor/common/modes';
-import { ITextModel } from 'vs/editor/common/model';
-import { CancellationToken } from 'vs/base/common/cancellation';
-import { LanguageFeatureRegistry } from 'vs/editor/common/modes/languageFeatureRegistry';
-import { URI } from 'vs/base/common/uri';
-import { IPosition, Position } from 'vs/editor/common/core/position';
-import { isNonEmptyArray } from 'vs/base/common/arrays';
-import { onUnexpectedExternalError } from 'vs/base/common/errors';
-import { IDisposable } from 'vs/base/common/lifecycle';
-import { CommandsRegistry } from 'vs/platform/commands/common/commands';
-import { assertType } from 'vs/base/common/types';
-import { IModelService } from 'vs/editor/common/services/modelService';
-import { ITextModelService } from 'vs/editor/common/services/resolverService';
+import { IRange } from '../../../../editor/common/core/range.js';
+import { SymbolKind, ProviderResult, SymbolTag } from '../../../../editor/common/languages.js';
+import { ITextModel } from '../../../../editor/common/model.js';
+import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { LanguageFeatureRegistry } from '../../../../editor/common/languageFeatureRegistry.js';
+import { URI } from '../../../../base/common/uri.js';
+import { IPosition, Position } from '../../../../editor/common/core/position.js';
+import { isNonEmptyArray } from '../../../../base/common/arrays.js';
+import { onUnexpectedExternalError } from '../../../../base/common/errors.js';
+import { IDisposable, RefCountedDisposable } from '../../../../base/common/lifecycle.js';
+import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
+import { assertType } from '../../../../base/common/types.js';
+import { IModelService } from '../../../../editor/common/services/model.js';
+import { ITextModelService } from '../../../../editor/common/services/resolverService.js';
 
 export const enum CallHierarchyDirection {
 	CallsTo = 'incomingCalls',
@@ -32,7 +32,7 @@ export interface CallHierarchyItem {
 	uri: URI;
 	range: IRange;
 	selectionRange: IRange;
-	tags?: SymbolTag[]
+	tags?: SymbolTag[];
 }
 
 export interface IncomingCall {
@@ -62,26 +62,6 @@ export interface CallHierarchyProvider {
 export const CallHierarchyProviderRegistry = new LanguageFeatureRegistry<CallHierarchyProvider>();
 
 
-class RefCountedDisposabled {
-
-	constructor(
-		private readonly _disposable: IDisposable,
-		private _counter = 1
-	) { }
-
-	acquire() {
-		this._counter++;
-		return this;
-	}
-
-	release() {
-		if (--this._counter === 0) {
-			this._disposable.dispose();
-		}
-		return this;
-	}
-}
-
 export class CallHierarchyModel {
 
 	static async create(model: ITextModel, position: IPosition, token: CancellationToken): Promise<CallHierarchyModel | undefined> {
@@ -93,7 +73,7 @@ export class CallHierarchyModel {
 		if (!session) {
 			return undefined;
 		}
-		return new CallHierarchyModel(session.roots.reduce((p, c) => p + c._sessionId, ''), provider, session.roots, new RefCountedDisposabled(session));
+		return new CallHierarchyModel(session.roots.reduce((p, c) => p + c._sessionId, ''), provider, session.roots, new RefCountedDisposable(session));
 	}
 
 	readonly root: CallHierarchyItem;
@@ -102,7 +82,7 @@ export class CallHierarchyModel {
 		readonly id: string,
 		readonly provider: CallHierarchyProvider,
 		readonly roots: CallHierarchyItem[],
-		readonly ref: RefCountedDisposabled,
+		readonly ref: RefCountedDisposable,
 	) {
 		this.root = roots[0];
 	}

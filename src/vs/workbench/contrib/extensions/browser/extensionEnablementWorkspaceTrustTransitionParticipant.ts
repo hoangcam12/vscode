@@ -3,13 +3,14 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Disposable } from 'vs/base/common/lifecycle';
-import { IWorkspaceTrustManagementService, IWorkspaceTrustTransitionParticipant } from 'vs/platform/workspace/common/workspaceTrust';
-import { IWorkbenchContribution } from 'vs/workbench/common/contributions';
-import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
-import { IWorkbenchExtensionEnablementService } from 'vs/workbench/services/extensionManagement/common/extensionManagement';
-import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
-import { IHostService } from 'vs/workbench/services/host/browser/host';
+import { localize } from '../../../../nls.js';
+import { Disposable } from '../../../../base/common/lifecycle.js';
+import { IWorkspaceTrustEnablementService, IWorkspaceTrustManagementService, IWorkspaceTrustTransitionParticipant } from '../../../../platform/workspace/common/workspaceTrust.js';
+import { IWorkbenchContribution } from '../../../common/contributions.js';
+import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
+import { IWorkbenchExtensionEnablementService } from '../../../services/extensionManagement/common/extensionManagement.js';
+import { IExtensionService } from '../../../services/extensions/common/extensions.js';
+import { IHostService } from '../../../services/host/browser/host.js';
 
 export class ExtensionEnablementWorkspaceTrustTransitionParticipant extends Disposable implements IWorkbenchContribution {
 	constructor(
@@ -17,11 +18,12 @@ export class ExtensionEnablementWorkspaceTrustTransitionParticipant extends Disp
 		@IHostService hostService: IHostService,
 		@IWorkbenchEnvironmentService environmentService: IWorkbenchEnvironmentService,
 		@IWorkbenchExtensionEnablementService extensionEnablementService: IWorkbenchExtensionEnablementService,
+		@IWorkspaceTrustEnablementService workspaceTrustEnablementService: IWorkspaceTrustEnablementService,
 		@IWorkspaceTrustManagementService workspaceTrustManagementService: IWorkspaceTrustManagementService,
 	) {
 		super();
 
-		if (workspaceTrustManagementService.workspaceTrustEnabled) {
+		if (workspaceTrustEnablementService.isWorkspaceTrustEnabled()) {
 			// The extension enablement participant will be registered only after the
 			// workspace trust state has been initialized. There is no need to execute
 			// the participant as part of the initialization process, as the workspace
@@ -31,15 +33,17 @@ export class ExtensionEnablementWorkspaceTrustTransitionParticipant extends Disp
 					async participate(trusted: boolean): Promise<void> {
 						if (trusted) {
 							// Untrusted -> Trusted
-							await extensionEnablementService.updateEnablementByWorkspaceTrustRequirement();
+							await extensionEnablementService.updateExtensionsEnablementsWhenWorkspaceTrustChanges();
 						} else {
 							// Trusted -> Untrusted
 							if (environmentService.remoteAuthority) {
 								hostService.reload();
 							} else {
-								extensionService.stopExtensionHosts();
-								await extensionEnablementService.updateEnablementByWorkspaceTrustRequirement();
-								extensionService.startExtensionHosts();
+								const stopped = await extensionService.stopExtensionHosts(localize('restartExtensionHost.reason', "Restarting extension host due to workspace trust change."));
+								await extensionEnablementService.updateExtensionsEnablementsWhenWorkspaceTrustChanges();
+								if (stopped) {
+									extensionService.startExtensionHosts();
+								}
 							}
 						}
 					}

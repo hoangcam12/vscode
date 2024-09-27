@@ -4,18 +4,14 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as cp from 'child_process';
-import minimist = require('minimist');
-import { Application } from '../../../../automation';
-import { afterSuite, beforeSuite } from '../../utils';
+import { Application, Logger } from '../../../../automation';
+import { installAllHandlers } from '../../utils';
 
-// function wait(ms: number): Promise<void> {
-// 	return new Promise(r => setTimeout(r, ms));
-// }
+export function setup(logger: Logger) {
+	describe('Notebooks', () => { // https://github.com/microsoft/vscode/issues/140575
 
-
-export function setup(opts: minimist.ParsedArgs) {
-	describe('Notebooks', () => {
-		beforeSuite(opts);
+		// Shared before/after handling
+		installAllHandlers(logger);
 
 		afterEach(async function () {
 			const app = this.app as Application;
@@ -29,38 +25,54 @@ export function setup(opts: minimist.ParsedArgs) {
 			cp.execSync('git reset --hard HEAD --quiet', { cwd: app.workspacePathOrFolder });
 		});
 
-		afterSuite();
+		it.skip('check heap leaks', async function () {
+			const app = this.app as Application;
+			await app.profiler.checkHeapLeaks(['NotebookTextModel', 'NotebookCellTextModel', 'NotebookEventDispatcher'], async () => {
+				await app.workbench.notebook.openNotebook();
+				await app.workbench.quickaccess.runCommand('workbench.action.files.save');
+				await app.workbench.quickaccess.runCommand('workbench.action.closeActiveEditor');
+			});
+		});
 
-		// it('inserts/edits code cell', async function () {
-		// 	const app = this.app as Application;
-		// 	await app.workbench.notebook.openNotebook();
-		// 	await app.workbench.notebook.focusNextCell();
-		// 	await app.workbench.notebook.insertNotebookCell('code');
-		// 	await app.workbench.notebook.waitForTypeInEditor('// some code');
-		// 	await app.workbench.notebook.stopEditingCell();
-		// });
+		it('check object leaks', async function () {
+			const app = this.app as Application;
+			await app.profiler.checkObjectLeaks(['NotebookTextModel', 'NotebookCellTextModel', 'NotebookEventDispatcher'], async () => {
+				await app.workbench.notebook.openNotebook();
+				await app.workbench.quickaccess.runCommand('workbench.action.files.save');
+				await app.workbench.quickaccess.runCommand('workbench.action.closeActiveEditor');
+			});
+		});
 
-		// it('inserts/edits markdown cell', async function () {
-		// 	const app = this.app as Application;
-		// 	await app.workbench.notebook.openNotebook();
-		// 	await app.workbench.notebook.focusNextCell();
-		// 	await app.workbench.notebook.insertNotebookCell('markdown');
-		// 	await app.workbench.notebook.waitForTypeInEditor('## hello2! ');
-		// 	await app.workbench.notebook.stopEditingCell();
-		// 	await app.workbench.notebook.waitForMarkdownContents('h2', 'hello2!');
-		// });
+		it.skip('inserts/edits code cell', async function () {
+			const app = this.app as Application;
+			await app.workbench.notebook.openNotebook();
+			await app.workbench.notebook.focusNextCell();
+			await app.workbench.notebook.insertNotebookCell('code');
+			await app.workbench.notebook.waitForTypeInEditor('// some code');
+			await app.workbench.notebook.stopEditingCell();
+		});
 
-		// it('moves focus as it inserts/deletes a cell', async function () {
-		// 	const app = this.app as Application;
-		// 	await app.workbench.notebook.openNotebook();
-		// 	await app.workbench.notebook.insertNotebookCell('code');
-		// 	await app.workbench.notebook.waitForActiveCellEditorContents('');
-		// 	await app.workbench.notebook.stopEditingCell();
-		// 	await app.workbench.notebook.deleteActiveCell();
-		// 	await app.workbench.notebook.waitForMarkdownContents('p', 'Markdown Cell');
-		// });
+		it.skip('inserts/edits markdown cell', async function () {
+			const app = this.app as Application;
+			await app.workbench.notebook.openNotebook();
+			await app.workbench.notebook.focusNextCell();
+			await app.workbench.notebook.insertNotebookCell('markdown');
+			await app.workbench.notebook.waitForTypeInEditor('## hello2! ');
+			await app.workbench.notebook.stopEditingCell();
+			await app.workbench.notebook.waitForMarkdownContents('h2', 'hello2!');
+		});
 
-		it.skip('moves focus in and out of output', async function () { // TODO@rebornix https://github.com/microsoft/vscode/issues/113882
+		it.skip('moves focus as it inserts/deletes a cell', async function () {
+			const app = this.app as Application;
+			await app.workbench.notebook.openNotebook();
+			await app.workbench.notebook.insertNotebookCell('code');
+			await app.workbench.notebook.waitForActiveCellEditorContents('');
+			await app.workbench.notebook.stopEditingCell();
+			await app.workbench.notebook.deleteActiveCell();
+			await app.workbench.notebook.waitForMarkdownContents('p', 'Markdown Cell');
+		});
+
+		it.skip('moves focus in and out of output', async function () { // TODO@rebornix https://github.com/microsoft/vscode/issues/139270
 			const app = this.app as Application;
 			await app.workbench.notebook.openNotebook();
 			await app.workbench.notebook.executeActiveCell();
@@ -69,7 +81,7 @@ export function setup(opts: minimist.ParsedArgs) {
 			await app.workbench.notebook.waitForActiveCellEditorContents('code()');
 		});
 
-		it.skip('cell action execution', async function () {
+		it.skip('cell action execution', async function () { // TODO@rebornix https://github.com/microsoft/vscode/issues/139270
 			const app = this.app as Application;
 			await app.workbench.notebook.openNotebook();
 			await app.workbench.notebook.insertNotebookCell('code');

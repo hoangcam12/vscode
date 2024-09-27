@@ -3,33 +3,42 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ISignService } from 'vs/platform/sign/common/sign';
+import { importAMDNodeModule } from '../../../amdX.js';
+import { AbstractSignService, IVsdaValidator } from '../common/abstractSignService.js';
+import { ISignService } from '../common/sign.js';
 
 declare module vsda {
 	// the signer is a native module that for historical reasons uses a lower case class name
 	// eslint-disable-next-line @typescript-eslint/naming-convention
 	export class signer {
-		sign(arg: any): any;
+		sign(arg: string): string;
+	}
+
+	// eslint-disable-next-line @typescript-eslint/naming-convention
+	export class validator {
+		createNewMessage(arg: string): string;
+		validate(arg: string): 'ok' | 'error';
 	}
 }
 
-export class SignService implements ISignService {
-	declare readonly _serviceBrand: undefined;
-
-	private vsda(): Promise<typeof vsda> {
-		return new Promise((resolve, reject) => require(['vsda'], resolve, reject));
+export class SignService extends AbstractSignService implements ISignService {
+	protected override getValidator(): Promise<IVsdaValidator> {
+		return this.vsda().then(vsda => new vsda.validator());
+	}
+	protected override signValue(arg: string): Promise<string> {
+		return this.vsda().then(vsda => new vsda.signer().sign(arg));
 	}
 
-	async sign(value: string): Promise<string> {
-		try {
-			const vsda = await this.vsda();
-			const signer = new vsda.signer();
-			if (signer) {
-				return signer.sign(value);
-			}
-		} catch (e) {
-			// ignore errors silently
-		}
-		return value;
+	private async vsda(): Promise<typeof vsda> {
+		// ESM-uncomment-begin
+		if (typeof importAMDNodeModule === 'function') { /* fixes unused import, remove me */ }
+		const mod = 'vsda';
+		const { default: vsda } = await import(mod);
+		return vsda;
+		// ESM-uncomment-end
+
+		// ESM-comment-begin
+		// return importAMDNodeModule('vsda', 'index.js');
+		// ESM-comment-end
 	}
 }

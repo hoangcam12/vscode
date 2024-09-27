@@ -3,8 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Event } from 'vs/base/common/event';
-import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
+import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { Event } from '../../../../base/common/event.js';
+import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 
 export const ILifecycleService = createDecorator<ILifecycleService>('lifecycleService');
 
@@ -20,6 +21,11 @@ export const ILifecycleService = createDecorator<ILifecycleService>('lifecycleSe
 export interface BeforeShutdownEvent {
 
 	/**
+	 * The reason why the application will be shutting down.
+	 */
+	readonly reason: ShutdownReason;
+
+	/**
 	 * Allows to veto the shutdown. The veto can be a long running operation but it
 	 * will block the application from closing.
 	 *
@@ -27,11 +33,66 @@ export interface BeforeShutdownEvent {
 	 * completes.
 	 */
 	veto(value: boolean | Promise<boolean>, id: string): void;
+}
+
+export interface InternalBeforeShutdownEvent extends BeforeShutdownEvent {
 
 	/**
-	 * The reason why the application will be shutting down.
+	 * Allows to set a veto operation to run after all other
+	 * vetos have been handled from the `BeforeShutdownEvent`
+	 *
+	 * This method is hidden from the API because it is intended
+	 * to be only used once internally.
+	 */
+	finalVeto(vetoFn: () => boolean | Promise<boolean>, id: string): void;
+}
+
+/**
+ * An event that signals an error happened during `onBeforeShutdown` veto handling.
+ * In this case the shutdown operation will not proceed because this is an unexpected
+ * condition that is treated like a veto.
+ */
+export interface BeforeShutdownErrorEvent {
+
+	/**
+	 * The reason why the application is shutting down.
 	 */
 	readonly reason: ShutdownReason;
+
+	/**
+	 * The error that happened during shutdown handling.
+	 */
+	readonly error: Error;
+}
+
+export enum WillShutdownJoinerOrder {
+
+	/**
+	 * Joiners to run before the `Last` joiners. This is the default order and best for
+	 * most cases. You can be sure that services are still functional at this point.
+	 */
+	Default = 1,
+
+	/**
+	 * The joiners to run last. This should ONLY be used in rare cases when you have no
+	 * dependencies to workbench services or state. The workbench may be in a state where
+	 * resources can no longer be accessed or changed.
+	 */
+	Last
+}
+
+export interface IWillShutdownEventJoiner {
+	readonly id: string;
+	readonly label: string;
+	readonly order?: WillShutdownJoinerOrder;
+}
+
+export interface IWillShutdownEventDefaultJoiner extends IWillShutdownEventJoiner {
+	readonly order?: WillShutdownJoinerOrder.Default;
+}
+
+export interface IWillShutdownEventLastJoiner extends IWillShutdownEventJoiner {
+	readonly order: WillShutdownJoinerOrder.Last;
 }
 
 /**
@@ -45,39 +106,75 @@ export interface BeforeShutdownEvent {
 export interface WillShutdownEvent {
 
 	/**
-	 * Allows to join the shutdown. The promise can be a long running operation but it
-	 * will block the application from closing.
-	 *
-	 * @param id to identify the join operation in case it takes very long or never
-	 * completes.
-	 */
-	join(promise: Promise<void>, id: string): void;
-
-	/**
 	 * The reason why the application is shutting down.
 	 */
 	readonly reason: ShutdownReason;
+
+	/**
+	 * A token that will signal cancellation when the
+	 * shutdown was forced by the user.
+	 */
+	readonly token: CancellationToken;
+
+	/**
+	 * Allows to join the shutdown. The promise can be a long running operation but it
+	 * will block the application from closing.
+	 *
+	 * @param promise the promise to join the shutdown event.
+	 * @param joiner to identify the join operation in case it takes very long or never
+	 * completes.
+	 */
+	join(promise: Promise<void>, joiner: IWillShutdownEventDefaultJoiner): void;
+
+	/**
+	 * Allows to join the shutdown at the end. The promise can be a long running operation but it
+	 * will block the application from closing.
+	 *
+	 * @param promiseFn the promise to join the shutdown event.
+	 * @param joiner to identify the join operation in case it takes very long or never
+	 * completes.
+	 */
+	join(promiseFn: (() => Promise<void>), joiner: IWillShutdownEventLastJoiner): void;
+
+	/**
+	 * Allows to access the joiners that have not finished joining this event.
+	 */
+	joiners(): IWillShutdownEventJoiner[];
+
+	/**
+	 * Allows to enforce the shutdown, even when there are
+	 * pending `join` operations to complete.
+	 */
+	force(): void;
 }
 
 export const enum ShutdownReason {
 
-	/** Window is closed */
+	/**
+	 * The window is closed.
+	 */
 	CLOSE = 1,
 
-	/** Application is quit */
-	QUIT = 2,
+	/**
+	 * The window closes because the application quits.
+	 */
+	QUIT,
 
-	/** Window is reloaded */
-	RELOAD = 3,
+	/**
+	 * The window is reloaded.
+	 */
+	RELOAD,
 
-	/** Other configuration loaded into window */
-	LOAD = 4
+	/**
+	 * The window is loaded into a different workspace context.
+	 */
+	LOAD
 }
 
 export const enum StartupKind {
 	NewWindow = 1,
 	ReloadedWindow = 3,
-	ReopenedWindow = 4,
+	ReopenedWindow = 4
 }
 
 export function StartupKindToString(startupKind: StartupKind): string {
@@ -119,7 +216,7 @@ export const enum LifecyclePhase {
 	Eventually = 4
 }
 
-export function LifecyclePhaseToString(phase: LifecyclePhase) {
+export function LifecyclePhaseToString(phase: LifecyclePhase): string {
 	switch (phase) {
 		case LifecyclePhase.Starting: return 'Starting';
 		case LifecyclePhase.Ready: return 'Ready';
@@ -155,6 +252,20 @@ export interface ILifecycleService {
 	readonly onBeforeShutdown: Event<BeforeShutdownEvent>;
 
 	/**
+	 * Fired when the shutdown was prevented by a component giving veto.
+	 */
+	readonly onShutdownVeto: Event<void>;
+
+	/**
+	 * Fired when an error happened during `onBeforeShutdown` veto handling.
+	 * In this case the shutdown operation will not proceed because this is
+	 * an unexpected condition that is treated like a veto.
+	 *
+	 * The event carries a shutdown reason that indicates how the shutdown was triggered.
+	 */
+	readonly onBeforeShutdownError: Event<BeforeShutdownErrorEvent>;
+
+	/**
 	 * Fired when no client is preventing the shutdown from happening (from `onBeforeShutdown`).
 	 *
 	 * This event can be joined with a long running operation via `WillShutdownEvent#join()` to
@@ -185,20 +296,5 @@ export interface ILifecycleService {
 	 * **Note:** this should normally not be called. See related methods in `IHostService`
 	 * and `INativeHostService` to close a window or quit the application.
 	 */
-	shutdown(): void;
+	shutdown(): Promise<void>;
 }
-
-export const NullLifecycleService: ILifecycleService = {
-
-	_serviceBrand: undefined,
-
-	onBeforeShutdown: Event.None,
-	onWillShutdown: Event.None,
-	onDidShutdown: Event.None,
-
-	phase: LifecyclePhase.Restored,
-	startupKind: StartupKind.NewWindow,
-
-	async when() { },
-	shutdown() { }
-};

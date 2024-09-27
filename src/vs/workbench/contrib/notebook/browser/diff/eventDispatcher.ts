@@ -3,9 +3,10 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Emitter } from 'vs/base/common/event';
-import { IDiffElementLayoutInfo } from 'vs/workbench/contrib/notebook/browser/diff/notebookDiffEditorBrowser';
-import { NotebookLayoutChangeEvent, NotebookLayoutInfo } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
+import { Emitter } from '../../../../../base/common/event.js';
+import { Disposable } from '../../../../../base/common/lifecycle.js';
+import { IDiffElementLayoutInfo } from './notebookDiffEditorBrowser.js';
+import { NotebookLayoutChangeEvent, NotebookLayoutInfo } from '../notebookViewEvents.js';
 
 export enum NotebookDiffViewEventType {
 	LayoutChanged = 1,
@@ -32,14 +33,12 @@ export class NotebookCellLayoutChangedEvent {
 
 export type NotebookDiffViewEvent = NotebookDiffLayoutChangedEvent | NotebookCellLayoutChangedEvent;
 
-export class NotebookDiffEditorEventDispatcher {
-	protected readonly _onDidChangeLayout = new Emitter<NotebookDiffLayoutChangedEvent>();
+export class NotebookDiffEditorEventDispatcher extends Disposable {
+	protected readonly _onDidChangeLayout = this._register(new Emitter<NotebookDiffLayoutChangedEvent>());
 	readonly onDidChangeLayout = this._onDidChangeLayout.event;
-	protected readonly _onDidChangeCellLayout = new Emitter<NotebookCellLayoutChangedEvent>();
-	readonly onDidChangeCellLayout = this._onDidChangeCellLayout.event;
 
-	constructor() {
-	}
+	protected readonly _onDidChangeCellLayout = this._register(new Emitter<NotebookCellLayoutChangedEvent>());
+	readonly onDidChangeCellLayout = this._onDidChangeCellLayout.event;
 
 	emit(events: NotebookDiffViewEvent[]) {
 		for (let i = 0, len = events.length; i < len; i++) {

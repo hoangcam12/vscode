@@ -3,13 +3,14 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Emitter, Event } from 'vs/base/common/event';
-import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
-import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
-import { EditorsOrder, IEditorIdentifier, IEditorInput } from 'vs/workbench/common/editor';
-import { IWorkingCopy, IWorkingCopyIdentifier } from 'vs/workbench/services/workingCopy/common/workingCopy';
-import { Disposable, IDisposable, toDisposable } from 'vs/base/common/lifecycle';
-import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
+import { Emitter, Event } from '../../../../base/common/event.js';
+import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
+import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
+import { EditorsOrder, IEditorIdentifier } from '../../../common/editor.js';
+import { EditorInput } from '../../../common/editor/editorInput.js';
+import { IWorkingCopy, IWorkingCopyIdentifier } from './workingCopy.js';
+import { Disposable, IDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
+import { IEditorService } from '../../editor/common/editorService.js';
 
 export const IWorkingCopyEditorService = createDecorator<IWorkingCopyEditorService>('workingCopyEditorService');
 
@@ -19,17 +20,17 @@ export interface IWorkingCopyEditorHandler {
 	 * Whether the handler is capable of opening the specific backup in
 	 * an editor.
 	 */
-	handles(workingCopy: IWorkingCopyIdentifier): boolean;
+	handles(workingCopy: IWorkingCopyIdentifier): boolean | Promise<boolean>;
 
 	/**
 	 * Whether the provided working copy is opened in the provided editor.
 	 */
-	isOpen(workingCopy: IWorkingCopyIdentifier, editor: IEditorInput): boolean;
+	isOpen(workingCopy: IWorkingCopyIdentifier, editor: EditorInput): boolean;
 
 	/**
 	 * Create an editor that is suitable of opening the provided working copy.
 	 */
-	createEditor(workingCopy: IWorkingCopyIdentifier): IEditorInput | Promise<IEditorInput>;
+	createEditor(workingCopy: IWorkingCopyIdentifier): EditorInput | Promise<EditorInput>;
 }
 
 export interface IWorkingCopyEditorService {
@@ -84,9 +85,9 @@ export class WorkingCopyEditorService extends Disposable implements IWorkingCopy
 		return undefined;
 	}
 
-	private isOpen(workingCopy: IWorkingCopy, editor: IEditorInput): boolean {
+	private isOpen(workingCopy: IWorkingCopy, editor: EditorInput): boolean {
 		for (const handler of this.handlers) {
-			if (handler.handles(workingCopy) && handler.isOpen(workingCopy, editor)) {
+			if (handler.isOpen(workingCopy, editor)) {
 				return true;
 			}
 		}
@@ -96,4 +97,4 @@ export class WorkingCopyEditorService extends Disposable implements IWorkingCopy
 }
 
 // Register Service
-registerSingleton(IWorkingCopyEditorService, WorkingCopyEditorService);
+registerSingleton(IWorkingCopyEditorService, WorkingCopyEditorService, InstantiationType.Delayed);

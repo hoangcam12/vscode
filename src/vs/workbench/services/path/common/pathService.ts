@@ -3,15 +3,17 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Schemas } from 'vs/base/common/network';
-import { IPath, win32, posix } from 'vs/base/common/path';
-import { OperatingSystem, OS } from 'vs/base/common/platform';
-import { URI } from 'vs/base/common/uri';
-import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
-import { getVirtualWorkspaceScheme } from 'vs/platform/remote/common/remoteHosts';
-import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
-import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
-import { IRemoteAgentService } from 'vs/workbench/services/remote/common/remoteAgentService';
+import { isValidBasename } from '../../../../base/common/extpath.js';
+import { Schemas } from '../../../../base/common/network.js';
+import { IPath, win32, posix } from '../../../../base/common/path.js';
+import { OperatingSystem, OS } from '../../../../base/common/platform.js';
+import { basename } from '../../../../base/common/resources.js';
+import { URI } from '../../../../base/common/uri.js';
+import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
+import { getVirtualWorkspaceScheme } from '../../../../platform/workspace/common/virtualWorkspace.js';
+import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { IWorkbenchEnvironmentService } from '../../environment/common/environmentService.js';
+import { IRemoteAgentService } from '../../remote/common/remoteAgentService.js';
 
 export const IPathService = createDecorator<IPathService>('pathService');
 
@@ -55,7 +57,20 @@ export interface IPathService {
 	 * remote's user home directory, otherwise the local one unless
 	 * `preferLocal` is set to `true`.
 	 */
+	userHome(options: { preferLocal: true }): URI;
 	userHome(options?: { preferLocal: boolean }): Promise<URI>;
+
+	/**
+	 * Figures out if the provided resource has a valid file name
+	 * for the operating system the file is saved to.
+	 *
+	 * Note: this currently only supports `file` and `vscode-file`
+	 * protocols where we know the limits of the file systems behind
+	 * these OS. Other remotes are not supported and this method
+	 * will always return `true` for them.
+	 */
+	hasValidBasename(resource: URI, basename?: string): Promise<boolean>;
+	hasValidBasename(resource: URI, os: OperatingSystem, basename?: string): boolean;
 
 	/**
 	 * @deprecated use `userHome` instead.
@@ -89,18 +104,42 @@ export abstract class AbstractPathService implements IPathService {
 		// User Home
 		this.resolveUserHome = (async () => {
 			const env = await this.remoteAgentService.getEnvironment();
-			const userHome = this.maybeUnresolvedUserHome = env?.userHome || localUserHome;
-
+			const userHome = this.maybeUnresolvedUserHome = env?.userHome ?? localUserHome;
 
 			return userHome;
 		})();
+	}
+
+	hasValidBasename(resource: URI, basename?: string): Promise<boolean>;
+	hasValidBasename(resource: URI, os: OperatingSystem, basename?: string): boolean;
+	hasValidBasename(resource: URI, arg2?: string | OperatingSystem, basename?: string): boolean | Promise<boolean> {
+
+		// async version
+		if (typeof arg2 === 'string' || typeof arg2 === 'undefined') {
+			return this.resolveOS.then(os => this.doHasValidBasename(resource, os, arg2));
+		}
+
+		// sync version
+		return this.doHasValidBasename(resource, arg2, basename);
+	}
+
+	private doHasValidBasename(resource: URI, os: OperatingSystem, name?: string): boolean {
+
+		// Our `isValidBasename` method only works with our
+		// standard schemes for files on disk, either locally
+		// or remote.
+		if (resource.scheme === Schemas.file || resource.scheme === Schemas.vscodeRemote) {
+			return isValidBasename(name ?? basename(resource), os === OperatingSystem.Windows);
+		}
+
+		return true;
 	}
 
 	get defaultUriScheme(): string {
 		return AbstractPathService.findDefaultUriScheme(this.environmentService, this.contextService);
 	}
 
-	protected static findDefaultUriScheme(environmentService: IWorkbenchEnvironmentService, contextService: IWorkspaceContextService): string {
+	static findDefaultUriScheme(environmentService: IWorkbenchEnvironmentService, contextService: IWorkspaceContextService): string {
 		if (environmentService.remoteAuthority) {
 			return Schemas.vscodeRemote;
 		}
@@ -123,7 +162,9 @@ export abstract class AbstractPathService implements IPathService {
 		return Schemas.file;
 	}
 
-	async userHome(options?: { preferLocal: boolean }): Promise<URI> {
+	userHome(options?: { preferLocal: boolean }): Promise<URI>;
+	userHome(options: { preferLocal: true }): URI;
+	userHome(options?: { preferLocal: boolean }): Promise<URI> | URI {
 		return options?.preferLocal ? this.localUserHome : this.resolveUserHome;
 	}
 

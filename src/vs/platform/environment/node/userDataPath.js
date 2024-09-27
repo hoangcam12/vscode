@@ -6,26 +6,43 @@
 /// <reference path="../../../../typings/require.d.ts" />
 
 //@ts-check
+'use strict';
+
+// ESM-uncomment-begin
+import * as os from 'os';
+import * as path from 'path';
+
+/** @type any */
+const module = { exports: {} };
+// ESM-uncomment-end
+
 (function () {
-	'use strict';
+	// ESM-comment-begin
+	// const isESM = false;
+	// ESM-comment-end
+	// ESM-uncomment-begin
+	const isESM = true;
+	// ESM-uncomment-end
 
 	/**
-	 * @typedef {import('../../environment/common/argv').NativeParsedArgs} NativeParsedArgs
-	 *
+	 * @import { NativeParsedArgs } from '../../environment/common/argv'
+	 */
+
+	/**
 	 * @param {typeof import('path')} path
 	 * @param {typeof import('os')} os
-	 * @param {string} productName
 	 * @param {string} cwd
 	 */
-	function factory(path, os, productName, cwd) {
+	function factory(path, os, cwd) {
 
 		/**
 		 * @param {NativeParsedArgs} cliArgs
+		 * @param {string} productName
 		 *
 		 * @returns {string}
 		 */
-		function getUserDataPath(cliArgs) {
-			const userDataPath = doGetUserDataPath(cliArgs);
+		function getUserDataPath(cliArgs, productName) {
+			const userDataPath = doGetUserDataPath(cliArgs, productName);
 			const pathsToResolve = [userDataPath];
 
 			// If the user-data-path is not absolute, make
@@ -43,10 +60,16 @@
 
 		/**
 		 * @param {NativeParsedArgs} cliArgs
+		 * @param {string} productName
 		 *
 		 * @returns {string}
 		 */
-		function doGetUserDataPath(cliArgs) {
+		function doGetUserDataPath(cliArgs, productName) {
+
+			// 0. Running out of sources has a fixed productName
+			if (process.env['VSCODE_DEV']) {
+				productName = 'code-oss-dev';
+			}
 
 			// 1. Support portable mode
 			const portablePath = process.env['VSCODE_PORTABLE'];
@@ -54,38 +77,42 @@
 				return path.join(portablePath, 'user-data');
 			}
 
-			// 2. Support explicit --user-data-dir
+			// 2. Support global VSCODE_APPDATA environment variable
+			let appDataPath = process.env['VSCODE_APPDATA'];
+			if (appDataPath) {
+				return path.join(appDataPath, productName);
+			}
+
+			// With Electron>=13 --user-data-dir switch will be propagated to
+			// all processes https://github.com/electron/electron/blob/1897b14af36a02e9aa7e4d814159303441548251/shell/browser/electron_browser_client.cc#L546-L553
+			// Check VSCODE_PORTABLE and VSCODE_APPDATA before this case to get correct values.
+			// 3. Support explicit --user-data-dir
 			const cliPath = cliArgs['user-data-dir'];
 			if (cliPath) {
 				return cliPath;
 			}
 
-			// 3. Support global VSCODE_APPDATA environment variable
-			let appDataPath = process.env['VSCODE_APPDATA'];
-
 			// 4. Otherwise check per platform
-			if (!appDataPath) {
-				switch (process.platform) {
-					case 'win32':
-						appDataPath = process.env['APPDATA'];
-						if (!appDataPath) {
-							const userProfile = process.env['USERPROFILE'];
-							if (typeof userProfile !== 'string') {
-								throw new Error('Windows: Unexpected undefined %USERPROFILE% environment variable');
-							}
-
-							appDataPath = path.join(userProfile, 'AppData', 'Roaming');
+			switch (process.platform) {
+				case 'win32':
+					appDataPath = process.env['APPDATA'];
+					if (!appDataPath) {
+						const userProfile = process.env['USERPROFILE'];
+						if (typeof userProfile !== 'string') {
+							throw new Error('Windows: Unexpected undefined %USERPROFILE% environment variable');
 						}
-						break;
-					case 'darwin':
-						appDataPath = path.join(os.homedir(), 'Library', 'Application Support');
-						break;
-					case 'linux':
-						appDataPath = process.env['XDG_CONFIG_HOME'] || path.join(os.homedir(), '.config');
-						break;
-					default:
-						throw new Error('Platform not supported');
-				}
+
+						appDataPath = path.join(userProfile, 'AppData', 'Roaming');
+					}
+					break;
+				case 'darwin':
+					appDataPath = path.join(os.homedir(), 'Library', 'Application Support');
+					break;
+				case 'linux':
+					appDataPath = process.env['XDG_CONFIG_HOME'] || path.join(os.homedir(), '.config');
+					break;
+				default:
+					throw new Error('Platform not supported');
 			}
 
 			return path.join(appDataPath, productName);
@@ -96,27 +123,26 @@
 		};
 	}
 
-	if (typeof define === 'function') {
-		define(['require', 'path', 'os', 'vs/base/common/network', 'vs/base/common/resources', 'vs/base/common/process'], function (
-			require,
+	if (!isESM && typeof define === 'function') {
+		define(['path', 'os', 'vs/base/common/process'], function (
 			/** @type {typeof import('path')} */ path,
 			/** @type {typeof import('os')} */ os,
-			/** @type {typeof import('../../../base/common/network')} */ network,
-			/** @type {typeof import("../../../base/common/resources")} */ resources,
 			/** @type {typeof import("../../../base/common/process")} */ process
 		) {
-			const rootPath = resources.dirname(network.FileAccess.asFileUri('', require));
-			const pkg = require.__$__nodeRequire(resources.joinPath(rootPath, 'package.json').fsPath);
-
-			return factory(path, os, pkg.name, process.cwd());
-		}); // amd
+			return factory(path, os, process.cwd()); // amd
+		});
 	} else if (typeof module === 'object' && typeof module.exports === 'object') {
-		const pkg = require('../../../../../package.json');
-		const path = require('path');
-		const os = require('os');
+		// ESM-comment-begin
+		// const path = require('path');
+		// const os = require('os');
+		// ESM-comment-end
 
-		module.exports = factory(path, os, pkg.name, process.env['VSCODE_CWD'] || process.cwd()); // commonjs
+		module.exports = factory(path, os, process.env['VSCODE_CWD'] || process.cwd()); // commonjs
 	} else {
 		throw new Error('Unknown context');
 	}
 }());
+
+// ESM-uncomment-begin
+export const getUserDataPath = module.exports.getUserDataPath;
+// ESM-uncomment-end

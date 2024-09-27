@@ -3,17 +3,18 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Emitter, Event } from 'vs/base/common/event';
-import { DisposableStore } from 'vs/base/common/lifecycle';
-import { URI, UriComponents } from 'vs/base/common/uri';
-import { IModelChangedEvent } from 'vs/editor/common/model/mirrorTextModel';
-import { ExtHostDocumentsShape, IMainContext, MainContext, MainThreadDocumentsShape } from 'vs/workbench/api/common/extHost.protocol';
-import { ExtHostDocumentData, setWordDefinitionFor } from 'vs/workbench/api/common/extHostDocumentData';
-import { ExtHostDocumentsAndEditors } from 'vs/workbench/api/common/extHostDocumentsAndEditors';
-import * as TypeConverters from 'vs/workbench/api/common/extHostTypeConverters';
+import { Emitter, Event } from '../../../base/common/event.js';
+import { DisposableStore } from '../../../base/common/lifecycle.js';
+import { URI, UriComponents } from '../../../base/common/uri.js';
+import { IModelChangedEvent } from '../../../editor/common/model/mirrorTextModel.js';
+import { ExtHostDocumentsShape, IMainContext, MainContext, MainThreadDocumentsShape } from './extHost.protocol.js';
+import { ExtHostDocumentData, setWordDefinitionFor } from './extHostDocumentData.js';
+import { ExtHostDocumentsAndEditors } from './extHostDocumentsAndEditors.js';
+import * as TypeConverters from './extHostTypeConverters.js';
 import type * as vscode from 'vscode';
-import { assertIsDefined } from 'vs/base/common/types';
-import { deepFreeze } from 'vs/base/common/objects';
+import { assertIsDefined } from '../../../base/common/types.js';
+import { deepFreeze } from '../../../base/common/objects.js';
+import { TextDocumentChangeReason } from './extHostTypes.js';
 
 export class ExtHostDocuments implements ExtHostDocumentsShape {
 
@@ -102,16 +103,16 @@ export class ExtHostDocuments implements ExtHostDocumentsShape {
 		return this._proxy.$tryCreateDocument(options).then(data => URI.revive(data));
 	}
 
-	public $acceptModelModeChanged(uriComponents: UriComponents, newModeId: string): void {
+	public $acceptModelLanguageChanged(uriComponents: UriComponents, newLanguageId: string): void {
 		const uri = URI.revive(uriComponents);
 		const data = this._documentsAndEditors.getDocument(uri);
 		if (!data) {
 			throw new Error('unknown document');
 		}
-		// Treat a mode change as a remove + add
+		// Treat a language change as a remove + add
 
 		this._onDidRemoveDocument.fire(data.document);
-		data._acceptLanguageId(newModeId);
+		data._acceptLanguageId(newLanguageId);
 		this._onDidAddDocument.fire(data.document);
 	}
 
@@ -134,7 +135,8 @@ export class ExtHostDocuments implements ExtHostDocumentsShape {
 		data._acceptIsDirty(isDirty);
 		this._onDidChangeDocument.fire({
 			document: data.document,
-			contentChanges: []
+			contentChanges: [],
+			reason: undefined
 		});
 	}
 
@@ -146,6 +148,14 @@ export class ExtHostDocuments implements ExtHostDocumentsShape {
 		}
 		data._acceptIsDirty(isDirty);
 		data.onEvents(events);
+
+		let reason: vscode.TextDocumentChangeReason | undefined = undefined;
+		if (events.isUndoing) {
+			reason = TextDocumentChangeReason.Undo;
+		} else if (events.isRedoing) {
+			reason = TextDocumentChangeReason.Redo;
+		}
+
 		this._onDidChangeDocument.fire(deepFreeze({
 			document: data.document,
 			contentChanges: events.changes.map((change) => {
@@ -155,11 +165,12 @@ export class ExtHostDocuments implements ExtHostDocumentsShape {
 					rangeLength: change.rangeLength,
 					text: change.text
 				};
-			})
+			}),
+			reason
 		}));
 	}
 
-	public setWordDefinitionFor(modeId: string, wordDefinition: RegExp | undefined): void {
-		setWordDefinitionFor(modeId, wordDefinition);
+	public setWordDefinitionFor(languageId: string, wordDefinition: RegExp | undefined): void {
+		setWordDefinitionFor(languageId, wordDefinition);
 	}
 }

@@ -3,10 +3,10 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IIntegrityService, IntegrityTestResult } from 'vs/workbench/services/integrity/common/integrity';
-import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
+import { IIntegrityService, IntegrityTestResult } from '../common/integrity.js';
+import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 
-export class BrowserIntegrityServiceImpl implements IIntegrityService {
+export class IntegrityService implements IIntegrityService {
 
 	declare readonly _serviceBrand: undefined;
 
@@ -15,4 +15,4 @@ export class BrowserIntegrityServiceImpl implements IIntegrityService {
 	}
 }
 
-registerSingleton(IIntegrityService, BrowserIntegrityServiceImpl, true);
+registerSingleton(IIntegrityService, IntegrityService, InstantiationType.Delayed);

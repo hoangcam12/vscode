@@ -48,13 +48,6 @@ export class GitFileSystemProvider implements FileSystemProvider {
 			model.onDidChangeRepository(this.onDidChangeRepository, this),
 			model.onDidChangeOriginalResource(this.onDidChangeOriginalResource, this),
 			workspace.registerFileSystemProvider('git', this, { isReadonly: true, isCaseSensitive: true }),
-			workspace.registerResourceLabelFormatter({
-				scheme: 'git',
-				formatting: {
-					label: '${path} (git)',
-					separator: '/'
-				}
-			})
 		);
 
 		setInterval(() => this.cleanup(), FIVE_MINUTES);
@@ -70,9 +63,14 @@ export class GitFileSystemProvider implements FileSystemProvider {
 			return;
 		}
 
-		const gitUri = toGitUri(uri, '', { replaceFileExtension: true });
+		const diffOriginalResourceUri = toGitUri(uri, '~',);
+		const quickDiffOriginalResourceUri = toGitUri(uri, '', { replaceFileExtension: true });
+
 		this.mtime = new Date().getTime();
-		this._onDidChangeFile.fire([{ type: FileChangeType.Changed, uri: gitUri }]);
+		this._onDidChangeFile.fire([
+			{ type: FileChangeType.Changed, uri: diffOriginalResourceUri },
+			{ type: FileChangeType.Changed, uri: quickDiffOriginalResourceUri }
+		]);
 	}
 
 	@debounce(1100)

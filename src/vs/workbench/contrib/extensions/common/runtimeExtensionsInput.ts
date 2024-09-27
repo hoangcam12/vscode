@@ -3,10 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as nls from 'vs/nls';
-import { URI } from 'vs/base/common/uri';
-import { EditorInputCapabilities } from 'vs/workbench/common/editor';
-import { EditorInput } from 'vs/workbench/common/editor/editorInput';
+import * as nls from '../../../../nls.js';
+import { URI } from '../../../../base/common/uri.js';
+import { EditorInputCapabilities, IUntypedEditorInput } from '../../../common/editor.js';
+import { EditorInput } from '../../../common/editor/editorInput.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
+import { Codicon } from '../../../../base/common/codicons.js';
+import { registerIcon } from '../../../../platform/theme/common/iconRegistry.js';
+
+const RuntimeExtensionsEditorIcon = registerIcon('runtime-extensions-editor-label-icon', Codicon.extensions, nls.localize('runtimeExtensionEditorLabelIcon', 'Icon of the runtime extensions editor label.'));
 
 export class RuntimeExtensionsInput extends EditorInput {
 
@@ -38,7 +43,14 @@ export class RuntimeExtensionsInput extends EditorInput {
 		return nls.localize('extensionsInputName', "Running Extensions");
 	}
 
-	override matches(other: unknown): boolean {
+	override getIcon(): ThemeIcon {
+		return RuntimeExtensionsEditorIcon;
+	}
+
+	override matches(other: EditorInput | IUntypedEditorInput): boolean {
+		if (super.matches(other)) {
+			return true;
+		}
 		return other instanceof RuntimeExtensionsInput;
 	}
 }

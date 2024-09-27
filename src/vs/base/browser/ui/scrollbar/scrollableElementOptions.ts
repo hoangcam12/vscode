@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ScrollbarVisibility } from 'vs/base/common/scrollable';
+import { ScrollbarVisibility } from '../../../common/scrollable.js';
 
 export interface ScrollableElementCreationOptions {
 	/**
@@ -131,7 +131,11 @@ export interface ScrollableElementChangeOptions {
 	mouseWheelScrollSensitivity?: number;
 	fastScrollSensitivity?: number;
 	scrollPredominantAxis?: boolean;
+	horizontal?: ScrollbarVisibility;
 	horizontalScrollbarSize?: number;
+	vertical?: ScrollbarVisibility;
+	verticalScrollbarSize?: number;
+	scrollByPage?: boolean;
 }
 
 export interface ScrollableElementResolvedOptions {

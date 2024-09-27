@@ -3,15 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Event } from 'vs/base/common/event';
-import { IPCClient } from 'vs/base/parts/ipc/common/ipc';
-import { Protocol as ElectronProtocol } from 'vs/base/parts/ipc/common/ipc.electron';
-import { IDisposable } from 'vs/base/common/lifecycle';
-import { VSBuffer } from 'vs/base/common/buffer';
-import { ipcRenderer } from 'vs/base/parts/sandbox/electron-sandbox/globals';
+import { VSBuffer } from '../../../common/buffer.js';
+import { Event } from '../../../common/event.js';
+import { IDisposable } from '../../../common/lifecycle.js';
+import { IPCClient } from '../common/ipc.js';
+import { Protocol as ElectronProtocol } from '../common/ipc.electron.js';
+import { ipcRenderer } from '../../sandbox/electron-sandbox/globals.js';
 
 /**
- * An implemention of `IPCClient` on top of Electron `ipcRenderer` IPC communication
+ * An implementation of `IPCClient` on top of Electron `ipcRenderer` IPC communication
  * provided from sandbox globals (via preload script).
  */
 export class Client extends IPCClient implements IDisposable {
@@ -34,5 +34,6 @@ export class Client extends IPCClient implements IDisposable {
 
 	override dispose(): void {
 		this.protocol.disconnect();
+		super.dispose();
 	}
 }

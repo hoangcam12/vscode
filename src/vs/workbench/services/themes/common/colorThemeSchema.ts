@@ -2,16 +2,16 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import * as nls from 'vs/nls';
+import * as nls from '../../../../nls.js';
 
-import { Registry } from 'vs/platform/registry/common/platform';
-import { Extensions as JSONExtensions, IJSONContributionRegistry } from 'vs/platform/jsonschemas/common/jsonContributionRegistry';
-import { IJSONSchema } from 'vs/base/common/jsonSchema';
+import { Registry } from '../../../../platform/registry/common/platform.js';
+import { Extensions as JSONExtensions, IJSONContributionRegistry } from '../../../../platform/jsonschemas/common/jsonContributionRegistry.js';
+import { IJSONSchema } from '../../../../base/common/jsonSchema.js';
 
-import { workbenchColorsSchemaId } from 'vs/platform/theme/common/colorRegistry';
-import { tokenStylingSchemaId } from 'vs/platform/theme/common/tokenClassificationRegistry';
+import { workbenchColorsSchemaId } from '../../../../platform/theme/common/colorRegistry.js';
+import { tokenStylingSchemaId } from '../../../../platform/theme/common/tokenClassificationRegistry.js';
 
-let textMateScopes = [
+const textMateScopes = [
 	'comment',
 	'comment.block',
 	'comment.block.documentation',
@@ -115,8 +115,7 @@ let textMateScopes = [
 ];
 
 export const textmateColorsSchemaId = 'vscode://schemas/textmate-colors';
-export const textmateColorSettingsSchemaId = `${textmateColorsSchemaId}#definitions/settings`;
-export const textmateColorGroupSchemaId = `${textmateColorsSchemaId}#definitions/colorGroup`;
+export const textmateColorGroupSchemaId = `${textmateColorsSchemaId}#/definitions/colorGroup`;
 
 const textmateColorSchema: IJSONSchema = {
 	type: 'array',
@@ -129,7 +128,7 @@ const textmateColorSchema: IJSONSchema = {
 					format: 'color-hex'
 				},
 				{
-					$ref: '#definitions/settings'
+					$ref: '#/definitions/settings'
 				}
 			]
 		},
@@ -149,10 +148,27 @@ const textmateColorSchema: IJSONSchema = {
 				},
 				fontStyle: {
 					type: 'string',
-					description: nls.localize('schema.token.fontStyle', 'Font style of the rule: \'italic\', \'bold\' or \'underline\' or a combination. The empty string unsets inherited settings.'),
-					pattern: '^(\\s*\\b(italic|bold|underline))*\\s*$',
-					patternErrorMessage: nls.localize('schema.fontStyle.error', 'Font style must be \'italic\', \'bold\' or \'underline\' or a combination or the empty string.'),
-					defaultSnippets: [{ label: nls.localize('schema.token.fontStyle.none', 'None (clear inherited style)'), bodyText: '""' }, { body: 'italic' }, { body: 'bold' }, { body: 'underline' }, { body: 'italic bold' }, { body: 'italic underline' }, { body: 'bold underline' }, { body: 'italic bold underline' }]
+					description: nls.localize('schema.token.fontStyle', 'Font style of the rule: \'italic\', \'bold\', \'underline\', \'strikethrough\' or a combination. The empty string unsets inherited settings.'),
+					pattern: '^(\\s*\\b(italic|bold|underline|strikethrough))*\\s*$',
+					patternErrorMessage: nls.localize('schema.fontStyle.error', 'Font style must be \'italic\', \'bold\', \'underline\', \'strikethrough\' or a combination or the empty string.'),
+					defaultSnippets: [
+						{ label: nls.localize('schema.token.fontStyle.none', 'None (clear inherited style)'), bodyText: '""' },
+						{ body: 'italic' },
+						{ body: 'bold' },
+						{ body: 'underline' },
+						{ body: 'strikethrough' },
+						{ body: 'italic bold' },
+						{ body: 'italic underline' },
+						{ body: 'italic strikethrough' },
+						{ body: 'bold underline' },
+						{ body: 'bold strikethrough' },
+						{ body: 'underline strikethrough' },
+						{ body: 'italic bold underline' },
+						{ body: 'italic bold strikethrough' },
+						{ body: 'italic underline strikethrough' },
+						{ body: 'bold underline strikethrough' },
+						{ body: 'italic bold underline strikethrough' }
+					]
 				}
 			},
 			additionalProperties: false,
@@ -191,11 +207,11 @@ const textmateColorSchema: IJSONSchema = {
 				]
 			},
 			settings: {
-				$ref: '#definitions/settings'
+				$ref: '#/definitions/settings'
 			}
 		},
 		required: [
-			'settings', 'scope'
+			'settings'
 		],
 		additionalProperties: false
 	}
@@ -239,8 +255,7 @@ const colorThemeSchema: IJSONSchema = {
 
 
 export function registerColorThemeSchemas() {
-	let schemaRegistry = Registry.as<IJSONContributionRegistry>(JSONExtensions.JSONContribution);
+	const schemaRegistry = Registry.as<IJSONContributionRegistry>(JSONExtensions.JSONContribution);
 	schemaRegistry.registerSchema(colorThemeSchemaId, colorThemeSchema);
 	schemaRegistry.registerSchema(textmateColorsSchemaId, textmateColorSchema);
 }
-

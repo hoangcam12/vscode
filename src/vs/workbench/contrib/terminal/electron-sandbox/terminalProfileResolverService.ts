@@ -3,15 +3,16 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { ILogService } from 'vs/platform/log/common/log';
-import { ILocalTerminalService } from 'vs/platform/terminal/common/terminal';
-import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
-import { IRemoteTerminalService, ITerminalService } from 'vs/workbench/contrib/terminal/browser/terminal';
-import { BaseTerminalProfileResolverService } from 'vs/workbench/contrib/terminal/browser/terminalProfileResolverService';
-import { IConfigurationResolverService } from 'vs/workbench/services/configurationResolver/common/configurationResolver';
-import { IHistoryService } from 'vs/workbench/services/history/common/history';
-import { IRemoteAgentService } from 'vs/workbench/services/remote/common/remoteAgentService';
+import { ErrorNoTelemetry } from '../../../../base/common/errors.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { ITerminalLogService } from '../../../../platform/terminal/common/terminal.js';
+import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { ITerminalInstanceService } from '../browser/terminal.js';
+import { BaseTerminalProfileResolverService } from '../browser/terminalProfileResolverService.js';
+import { ITerminalProfileService } from '../common/terminal.js';
+import { IConfigurationResolverService } from '../../../services/configurationResolver/common/configurationResolver.js';
+import { IHistoryService } from '../../../services/history/common/history.js';
+import { IRemoteAgentService } from '../../../services/remote/common/remoteAgentService.js';
 
 export class ElectronTerminalProfileResolverService extends BaseTerminalProfileResolverService {
 
@@ -19,32 +20,34 @@ export class ElectronTerminalProfileResolverService extends BaseTerminalProfileR
 		@IConfigurationResolverService configurationResolverService: IConfigurationResolverService,
 		@IConfigurationService configurationService: IConfigurationService,
 		@IHistoryService historyService: IHistoryService,
-		@ILogService logService: ILogService,
-		@ITerminalService terminalService: ITerminalService,
-		@ILocalTerminalService localTerminalService: ILocalTerminalService,
-		@IRemoteTerminalService remoteTerminalService: IRemoteTerminalService,
+		@ITerminalLogService logService: ITerminalLogService,
 		@IWorkspaceContextService workspaceContextService: IWorkspaceContextService,
-		@IRemoteAgentService remoteAgentService: IRemoteAgentService
+		@ITerminalProfileService terminalProfileService: ITerminalProfileService,
+		@IRemoteAgentService remoteAgentService: IRemoteAgentService,
+		@ITerminalInstanceService terminalInstanceService: ITerminalInstanceService
 	) {
 		super(
 			{
 				getDefaultSystemShell: async (remoteAuthority, platform) => {
-					const service = remoteAuthority ? remoteTerminalService : localTerminalService;
-					return service.getDefaultSystemShell(platform);
-				},
-				getEnvironment: (remoteAuthority) => {
-					if (remoteAuthority) {
-						return remoteTerminalService.getEnvironment();
-					} else {
-						return localTerminalService.getEnvironment();
+					const backend = await terminalInstanceService.getBackend(remoteAuthority);
+					if (!backend) {
+						throw new ErrorNoTelemetry(`Cannot get default system shell when there is no backend for remote authority '${remoteAuthority}'`);
 					}
+					return backend.getDefaultSystemShell(platform);
+				},
+				getEnvironment: async (remoteAuthority) => {
+					const backend = await terminalInstanceService.getBackend(remoteAuthority);
+					if (!backend) {
+						throw new ErrorNoTelemetry(`Cannot get environment when there is no backend for remote authority '${remoteAuthority}'`);
+					}
+					return backend.getEnvironment();
 				}
 			},
 			configurationService,
 			configurationResolverService,
 			historyService,
 			logService,
-			terminalService,
+			terminalProfileService,
 			workspaceContextService,
 			remoteAgentService
 		);

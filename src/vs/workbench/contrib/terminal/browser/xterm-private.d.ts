@@ -3,39 +3,31 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IBufferCell } from 'xterm';
+import { IBufferCell } from '@xterm/xterm';
 
-export type XTermAttributes = Omit<IBufferCell, 'getWidth' | 'getChars' | 'getCode'> & { clone?(): XTermAttributes };
+export type XtermAttributes = Omit<IBufferCell, 'getWidth' | 'getChars' | 'getCode'> & { clone?(): XtermAttributes };
 
-export interface XTermCore {
-	_onScroll: IEventEmitter<number>;
-	_onKey: IEventEmitter<{ key: string }>;
-
-	_charSizeService: {
-		width: number;
-		height: number;
-	};
-
-	_coreService: {
-		triggerDataEvent(data: string, wasUserInput?: boolean): void;
+export interface IXtermCore {
+	viewport?: {
+		readonly scrollBarWidth: number;
+		_innerRefresh(): void;
 	};
 
 	_inputHandler: {
-		_curAttrData: XTermAttributes;
+		_curAttrData: XtermAttributes;
 	};
 
 	_renderService: {
 		dimensions: {
-			actualCellWidth: number;
-			actualCellHeight: number;
+			css: {
+				cell: {
+					width: number;
+					height: number;
+				}
+			}
 		},
 		_renderer: {
-			_renderLayers: any[];
+			value?: unknown;
 		};
-		_onIntersectionChange: any;
 	};
-}
-
-export interface IEventEmitter<T> {
-	fire(e: T): void;
 }

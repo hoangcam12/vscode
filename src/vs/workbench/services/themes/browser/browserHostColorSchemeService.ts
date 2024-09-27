@@ -3,12 +3,12 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Emitter, Event } from 'vs/base/common/event';
-import * as dom from 'vs/base/browser/dom';
-import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
-import { Disposable } from 'vs/base/common/lifecycle';
-import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
-import { IHostColorSchemeService } from 'vs/workbench/services/themes/common/hostColorSchemeService';
+import { Emitter, Event } from '../../../../base/common/event.js';
+import { addMatchMediaChangeListener } from '../../../../base/browser/browser.js';
+import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
+import { Disposable } from '../../../../base/common/lifecycle.js';
+import { IHostColorSchemeService } from '../common/hostColorSchemeService.js';
+import { mainWindow } from '../../../../base/browser/window.js';
 
 export class BrowserHostColorSchemeService extends Disposable implements IHostColorSchemeService {
 
@@ -17,7 +17,6 @@ export class BrowserHostColorSchemeService extends Disposable implements IHostCo
 	private readonly _onDidSchemeChangeEvent = this._register(new Emitter<void>());
 
 	constructor(
-		@IWorkbenchEnvironmentService private environmentService: IWorkbenchEnvironmentService
 	) {
 		super();
 
@@ -26,10 +25,10 @@ export class BrowserHostColorSchemeService extends Disposable implements IHostCo
 
 	private registerListeners(): void {
 
-		dom.addMatchMediaChangeListener('(prefers-color-scheme: dark)', () => {
+		addMatchMediaChangeListener(mainWindow, '(prefers-color-scheme: dark)', () => {
 			this._onDidSchemeChangeEvent.fire();
 		});
-		dom.addMatchMediaChangeListener('(forced-colors: active)', () => {
+		addMatchMediaChangeListener(mainWindow, '(forced-colors: active)', () => {
 			this._onDidSchemeChangeEvent.fire();
 		});
 	}
@@ -39,21 +38,21 @@ export class BrowserHostColorSchemeService extends Disposable implements IHostCo
 	}
 
 	get dark(): boolean {
-		if (window.matchMedia(`(prefers-color-scheme: light)`).matches) {
+		if (mainWindow.matchMedia(`(prefers-color-scheme: light)`).matches) {
 			return false;
-		} else if (window.matchMedia(`(prefers-color-scheme: dark)`).matches) {
+		} else if (mainWindow.matchMedia(`(prefers-color-scheme: dark)`).matches) {
 			return true;
 		}
-		return this.environmentService.configuration.colorScheme.dark;
+		return false;
 	}
 
 	get highContrast(): boolean {
-		if (window.matchMedia(`(forced-colors: active)`).matches) {
+		if (mainWindow.matchMedia(`(forced-colors: active)`).matches) {
 			return true;
 		}
-		return this.environmentService.configuration.colorScheme.highContrast;
+		return false;
 	}
 
 }
 
-registerSingleton(IHostColorSchemeService, BrowserHostColorSchemeService, true);
+registerSingleton(IHostColorSchemeService, BrowserHostColorSchemeService, InstantiationType.Delayed);

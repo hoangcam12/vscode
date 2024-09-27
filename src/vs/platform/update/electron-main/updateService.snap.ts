@@ -3,17 +3,17 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Event, Emitter } from 'vs/base/common/event';
-import { timeout } from 'vs/base/common/async';
-import { ILifecycleMainService } from 'vs/platform/lifecycle/electron-main/lifecycleMainService';
-import { IUpdateService, State, StateType, AvailableForDownload, UpdateType } from 'vs/platform/update/common/update';
-import { IEnvironmentMainService } from 'vs/platform/environment/electron-main/environmentMainService';
-import { ILogService } from 'vs/platform/log/common/log';
-import * as path from 'vs/base/common/path';
-import { realpath, watch } from 'fs';
 import { spawn } from 'child_process';
-import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
-import { UpdateNotAvailableClassification } from 'vs/platform/update/electron-main/abstractUpdateService';
+import { realpath, watch } from 'fs';
+import { timeout } from '../../../base/common/async.js';
+import { Emitter, Event } from '../../../base/common/event.js';
+import * as path from '../../../base/common/path.js';
+import { IEnvironmentMainService } from '../../environment/electron-main/environmentMainService.js';
+import { ILifecycleMainService } from '../../lifecycle/electron-main/lifecycleMainService.js';
+import { ILogService } from '../../log/common/log.js';
+import { ITelemetryService } from '../../telemetry/common/telemetry.js';
+import { AvailableForDownload, IUpdateService, State, StateType, UpdateType } from '../common/update.js';
+import { UpdateNotAvailableClassification } from './abstractUpdateService.js';
 
 abstract class AbstractUpdateService implements IUpdateService {
 
@@ -129,6 +129,11 @@ abstract class AbstractUpdateService implements IUpdateService {
 	}
 
 	abstract isLatestVersion(): Promise<boolean | undefined>;
+
+	async _applySpecificUpdate(packagePath: string): Promise<void> {
+		// noop
+	}
+
 	protected abstract doCheckForUpdates(context: any): void;
 }
 
@@ -160,7 +165,7 @@ export class SnapUpdateService extends AbstractUpdateService {
 		this.setState(State.CheckingForUpdates(false));
 		this.isUpdateAvailable().then(result => {
 			if (result) {
-				this.setState(State.Ready({ version: 'something', productVersion: 'something' }));
+				this.setState(State.Ready({ version: 'something' }));
 			} else {
 				this.telemetryService.publicLog2<{ explicit: boolean }, UpdateNotAvailableClassification>('update:notAvailable', { explicit: false });
 

@@ -3,6 +3,37 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+// ESM-comment-begin
+// export const isESM = false;
+// export const canASAR = true;
+// ESM-comment-end
+// ESM-uncomment-begin
+export const isESM = true;
+export const canASAR = false; // TODO@esm: ASAR disabled in ESM
+// ESM-uncomment-end
+
+export const enum LoaderEventType {
+	LoaderAvailable = 1,
+
+	BeginLoadingScript = 10,
+	EndLoadingScriptOK = 11,
+	EndLoadingScriptError = 12,
+
+	BeginInvokeFactory = 21,
+	EndInvokeFactory = 22,
+
+	NodeBeginEvaluatingScript = 31,
+	NodeEndEvaluatingScript = 32,
+
+	NodeBeginNativeRequire = 33,
+	NodeEndNativeRequire = 34,
+
+	CachedDataFound = 60,
+	CachedDataMissed = 61,
+	CachedDataRejected = 62,
+	CachedDataCreated = 63,
+}
+
 export abstract class LoaderStats {
 	abstract get amdLoad(): [string, number][];
 	abstract get amdInvoke(): [string, number][];
@@ -26,7 +57,7 @@ export abstract class LoaderStats {
 		}
 
 		function diff(map: Map<string, number>, stat: LoaderEvent) {
-			let duration = map.get(stat.detail);
+			const duration = map.get(stat.detail);
 			if (!duration) {
 				// console.warn('BAD events, end WITHOUT start', stat);
 				// map.delete(stat.detail);
@@ -40,7 +71,10 @@ export abstract class LoaderStats {
 			map.set(stat.detail, duration + stat.timestamp);
 		}
 
-		const stats = require.getStats().slice(0).sort((a, b) => a.timestamp - b.timestamp);
+		let stats: readonly LoaderEvent[] = [];
+		if (typeof require === 'function' && typeof require.getStats === 'function') {
+			stats = require.getStats().slice(0).sort((a, b) => a.timestamp - b.timestamp);
+		}
 
 		for (const stat of stats) {
 			switch (stat.type) {
@@ -79,7 +113,7 @@ export abstract class LoaderStats {
 		nodeRequire.forEach(value => nodeRequireTotal += value);
 
 		function to2dArray(map: Map<string, number>): [string, number][] {
-			let res: [string, number][] = [];
+			const res: [string, number][] = [];
 			map.forEach((value, index) => res.push([index, value]));
 			return res;
 		}
@@ -96,7 +130,7 @@ export abstract class LoaderStats {
 	static toMarkdownTable(header: string[], rows: Array<Array<{ toString(): string } | undefined>>): string {
 		let result = '';
 
-		let lengths: number[] = [];
+		const lengths: number[] = [];
 		header.forEach((cell, ci) => {
 			lengths[ci] = cell.length;
 		});

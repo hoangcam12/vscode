@@ -3,18 +3,20 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as resources from 'vs/base/common/resources';
-import { URI } from 'vs/base/common/uri';
-import { Disposable } from 'vs/base/common/lifecycle';
-import { StandardTokenType, LanguageId } from 'vs/editor/common/modes';
+import * as resources from '../../../../base/common/resources.js';
+import { URI } from '../../../../base/common/uri.js';
+import { LanguageId, StandardTokenType } from '../../../../editor/common/encodedTokenAttributes.js';
 
 export interface IValidGrammarDefinition {
 	location: URI;
-	language?: LanguageId;
+	language?: string;
 	scopeName: string;
 	embeddedLanguages: IValidEmbeddedLanguagesMap;
 	tokenTypes: IValidTokenTypeMap;
 	injectTo?: string[];
+	balancedBracketSelectors: string[];
+	unbalancedBracketSelectors: string[];
+	sourceExtensionId?: string;
 }
 
 export interface IValidTokenTypeMap {
@@ -25,12 +27,11 @@ export interface IValidEmbeddedLanguagesMap {
 	[scopeName: string]: LanguageId;
 }
 
-export class TMScopeRegistry extends Disposable {
+export class TMScopeRegistry {
 
-	private _scopeNameToLanguageRegistration: { [scopeName: string]: IValidGrammarDefinition; };
+	private _scopeNameToLanguageRegistration: { [scopeName: string]: IValidGrammarDefinition };
 
 	constructor() {
-		super();
 		this._scopeNameToLanguageRegistration = Object.create(null);
 	}
 

@@ -3,16 +3,24 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { isFalsyOrEmpty, isNonEmptyArray } from 'vs/base/common/arrays';
-import { Schemas } from 'vs/base/common/network';
-import { IDisposable } from 'vs/base/common/lifecycle';
-import { URI } from 'vs/base/common/uri';
-import { Event, Emitter } from 'vs/base/common/event';
-import { IMarkerService, IMarkerData, IResourceMarker, IMarker, MarkerStatistics, MarkerSeverity } from './markers';
-import { ResourceMap } from 'vs/base/common/map';
-import { Iterable } from 'vs/base/common/iterator';
+import { isFalsyOrEmpty, isNonEmptyArray } from '../../../base/common/arrays.js';
+import { DebounceEmitter } from '../../../base/common/event.js';
+import { Iterable } from '../../../base/common/iterator.js';
+import { IDisposable } from '../../../base/common/lifecycle.js';
+import { ResourceMap } from '../../../base/common/map.js';
+import { Schemas } from '../../../base/common/network.js';
+import { URI } from '../../../base/common/uri.js';
+import { IMarker, IMarkerData, IMarkerService, IResourceMarker, MarkerSeverity, MarkerStatistics } from './markers.js';
 
-class DoubleResourceMap<V>{
+export const unsupportedSchemas = new Set([
+	Schemas.inMemory,
+	Schemas.vscodeSourceControl,
+	Schemas.walkThrough,
+	Schemas.walkThroughSnippet,
+	Schemas.vscodeChatCodeBlock,
+]);
+
+class DoubleResourceMap<V> {
 
 	private _byResource = new ResourceMap<Map<string, V>>();
 	private _byOwner = new Map<string, ResourceMap<V>>();
@@ -34,18 +42,18 @@ class DoubleResourceMap<V>{
 	}
 
 	get(resource: URI, owner: string): V | undefined {
-		let ownerMap = this._byResource.get(resource);
+		const ownerMap = this._byResource.get(resource);
 		return ownerMap?.get(owner);
 	}
 
 	delete(resource: URI, owner: string): boolean {
 		let removedA = false;
 		let removedB = false;
-		let ownerMap = this._byResource.get(resource);
+		const ownerMap = this._byResource.get(resource);
 		if (ownerMap) {
 			removedA = ownerMap.delete(owner);
 		}
-		let resourceMap = this._byOwner.get(owner);
+		const resourceMap = this._byOwner.get(owner);
 		if (resourceMap) {
 			removedB = resourceMap.delete(resource);
 		}
@@ -103,7 +111,7 @@ class MarkerStats implements MarkerStatistics {
 		const result: MarkerStatistics = { errors: 0, warnings: 0, infos: 0, unknowns: 0 };
 
 		// TODO this is a hack
-		if (resource.scheme === Schemas.inMemory || resource.scheme === Schemas.walkThrough || resource.scheme === Schemas.walkThroughSnippet) {
+		if (unsupportedSchemas.has(resource.scheme)) {
 			return result;
 		}
 
@@ -141,8 +149,12 @@ export class MarkerService implements IMarkerService {
 
 	declare readonly _serviceBrand: undefined;
 
-	private readonly _onMarkerChanged = new Emitter<readonly URI[]>();
-	readonly onMarkerChanged: Event<readonly URI[]> = Event.debounce(this._onMarkerChanged.event, MarkerService._debouncer, 0);
+	private readonly _onMarkerChanged = new DebounceEmitter<readonly URI[]>({
+		delay: 0,
+		merge: MarkerService._merge
+	});
+
+	readonly onMarkerChanged = this._onMarkerChanged.event;
 
 	private readonly _data = new DoubleResourceMap<IMarker[]>();
 	private readonly _stats = new MarkerStats(this);
@@ -226,7 +238,7 @@ export class MarkerService implements IMarkerService {
 		// remove old marker
 		const existing = this._data.values(owner);
 		if (existing) {
-			for (let data of existing) {
+			for (const data of existing) {
 				const first = Iterable.first(data);
 				if (first) {
 					changes.push(first.resource);
@@ -266,7 +278,7 @@ export class MarkerService implements IMarkerService {
 		}
 	}
 
-	read(filter: { owner?: string; resource?: URI; severities?: number, take?: number; } = Object.create(null)): IMarker[] {
+	read(filter: { owner?: string; resource?: URI; severities?: number; take?: number } = Object.create(null)): IMarker[] {
 
 		let { owner, resource, severities, take } = filter;
 
@@ -295,8 +307,8 @@ export class MarkerService implements IMarkerService {
 		} else if (!owner && !resource) {
 			// all
 			const result: IMarker[] = [];
-			for (let markers of this._data.values()) {
-				for (let data of markers) {
+			for (const markers of this._data.values()) {
+				for (const data of markers) {
 					if (MarkerService._accept(data, severities)) {
 						const newLen = result.push(data);
 						if (take > 0 && newLen === take) {
@@ -331,19 +343,13 @@ export class MarkerService implements IMarkerService {
 
 	// --- event debounce logic
 
-	private static _dedupeMap: ResourceMap<true>;
-
-	private static _debouncer(last: URI[] | undefined, event: readonly URI[]): URI[] {
-		if (!last) {
-			MarkerService._dedupeMap = new ResourceMap();
-			last = [];
-		}
-		for (const uri of event) {
-			if (!MarkerService._dedupeMap.has(uri)) {
-				MarkerService._dedupeMap.set(uri, true);
-				last.push(uri);
+	private static _merge(all: (readonly URI[])[]): URI[] {
+		const set = new ResourceMap<boolean>();
+		for (const array of all) {
+			for (const item of array) {
+				set.set(item, true);
 			}
 		}
-		return last;
+		return Array.from(set.keys());
 	}
 }

@@ -4,19 +4,18 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import type * as Proto from '../protocol';
+import { DocumentSelector } from '../configuration/documentSelector';
+import { LanguageDescription } from '../configuration/languageDescription';
+import type * as Proto from '../tsServer/protocol/protocol';
+import * as typeConverters from '../typeConverters';
 import { ITypeScriptServiceClient } from '../typescriptService';
-import API from '../utils/api';
-import { conditionalRegistration, requireMinVersion, requireConfiguration, Condition } from '../utils/dependentRegistration';
 import { Disposable } from '../utils/dispose';
-import { DocumentSelector } from '../utils/documentSelector';
-import * as typeConverters from '../utils/typeConverters';
+import { Condition, conditionalRegistration } from './util/dependentRegistration';
 
 class TagClosing extends Disposable {
-	public static readonly minVersion = API.v300;
 
 	private _disposed = false;
-	private _timeout: NodeJS.Timer | undefined = undefined;
+	private _timeout: NodeJS.Timeout | undefined = undefined;
 	private _cancel: vscode.CancellationTokenSource | undefined = undefined;
 
 	constructor(
@@ -24,7 +23,7 @@ class TagClosing extends Disposable {
 	) {
 		super();
 		vscode.workspace.onDidChangeTextDocument(
-			event => this.onDidChangeTextDocument(event.document, event.contentChanges),
+			event => this.onDidChangeTextDocument(event),
 			null,
 			this._disposables);
 	}
@@ -46,15 +45,18 @@ class TagClosing extends Disposable {
 	}
 
 	private onDidChangeTextDocument(
-		document: vscode.TextDocument,
-		changes: readonly vscode.TextDocumentContentChangeEvent[]
+		{ document, contentChanges, reason }: vscode.TextDocumentChangeEvent
 	) {
-		const activeDocument = vscode.window.activeTextEditor && vscode.window.activeTextEditor.document;
-		if (document !== activeDocument || changes.length === 0) {
+		if (contentChanges.length === 0 || reason === vscode.TextDocumentChangeReason.Undo || reason === vscode.TextDocumentChangeReason.Redo) {
 			return;
 		}
 
-		const filepath = this.client.toOpenedFilePath(document);
+		const activeDocument = vscode.window.activeTextEditor?.document;
+		if (document !== activeDocument) {
+			return;
+		}
+
+		const filepath = this.client.toOpenTsFilePath(document);
 		if (!filepath) {
 			return;
 		}
@@ -69,7 +71,7 @@ class TagClosing extends Disposable {
 			this._cancel = undefined;
 		}
 
-		const lastChange = changes[changes.length - 1];
+		const lastChange = contentChanges[contentChanges.length - 1];
 		const lastCharacter = lastChange.text[lastChange.text.length - 1];
 		if (lastChange.rangeLength > 0 || lastCharacter !== '>' && lastCharacter !== '/') {
 			return;
@@ -136,29 +138,33 @@ class TagClosing extends Disposable {
 	}
 }
 
-function requireActiveDocument(
-	selector: vscode.DocumentSelector
+function requireActiveDocumentSetting(
+	selector: vscode.DocumentSelector,
+	language: LanguageDescription,
 ) {
 	return new Condition(
 		() => {
 			const editor = vscode.window.activeTextEditor;
-			return !!(editor && vscode.languages.match(selector, editor.document));
+			if (!editor || !vscode.languages.match(selector, editor.document)) {
+				return false;
+			}
+
+			return !!vscode.workspace.getConfiguration(language.id, editor.document).get('autoClosingTags');
 		},
 		handler => {
 			return vscode.Disposable.from(
 				vscode.window.onDidChangeActiveTextEditor(handler),
-				vscode.workspace.onDidOpenTextDocument(handler));
+				vscode.workspace.onDidOpenTextDocument(handler),
+				vscode.workspace.onDidChangeConfiguration(handler));
 		});
 }
 
 export function register(
 	selector: DocumentSelector,
-	modeId: string,
+	language: LanguageDescription,
 	client: ITypeScriptServiceClient,
 ) {
 	return conditionalRegistration([
-		requireMinVersion(client, TagClosing.minVersion),
-		requireConfiguration(modeId, 'autoClosingTags'),
-		requireActiveDocument(selector.syntax)
+		requireActiveDocumentSetting(selector.syntax, language)
 	], () => new TagClosing(client));
 }

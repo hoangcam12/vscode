@@ -3,22 +3,22 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { URI } from 'vs/base/common/uri';
-import { Event } from 'vs/base/common/event';
-import { IDisposable } from 'vs/base/common/lifecycle';
-import { ISaveOptions, IRevertOptions, SaveReason } from 'vs/workbench/common/editor';
-import { ReadableStream } from 'vs/base/common/stream';
-import { IBaseStatWithMetadata, IFileStatWithMetadata, IWriteFileOptions, FileOperationError, FileOperationResult, IReadFileStreamOptions } from 'vs/platform/files/common/files';
-import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
-import { ITextEditorModel } from 'vs/editor/common/services/resolverService';
-import { ITextBufferFactory, ITextModel, ITextSnapshot } from 'vs/editor/common/model';
-import { VSBuffer, VSBufferReadable, VSBufferReadableStream } from 'vs/base/common/buffer';
-import { areFunctions, isUndefinedOrNull } from 'vs/base/common/types';
-import { IWorkingCopy } from 'vs/workbench/services/workingCopy/common/workingCopy';
-import { IUntitledTextEditorModelManager } from 'vs/workbench/services/untitled/common/untitledTextEditorService';
-import { CancellationToken } from 'vs/base/common/cancellation';
-import { IProgress, IProgressStep } from 'vs/platform/progress/common/progress';
-import { IFileOperationUndoRedoInfo } from 'vs/workbench/services/workingCopy/common/workingCopyFileService';
+import { URI } from '../../../../base/common/uri.js';
+import { Event } from '../../../../base/common/event.js';
+import { IDisposable } from '../../../../base/common/lifecycle.js';
+import { ISaveOptions, IRevertOptions, SaveReason } from '../../../common/editor.js';
+import { ReadableStream } from '../../../../base/common/stream.js';
+import { IBaseFileStatWithMetadata, IFileStatWithMetadata, IWriteFileOptions, FileOperationError, FileOperationResult, IReadFileStreamOptions, IFileReadLimits } from '../../../../platform/files/common/files.js';
+import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
+import { ITextEditorModel } from '../../../../editor/common/services/resolverService.js';
+import { ITextBufferFactory, ITextModel, ITextSnapshot } from '../../../../editor/common/model.js';
+import { VSBuffer, VSBufferReadable, VSBufferReadableStream } from '../../../../base/common/buffer.js';
+import { areFunctions, isUndefinedOrNull } from '../../../../base/common/types.js';
+import { IWorkingCopy, IWorkingCopySaveEvent } from '../../workingCopy/common/workingCopy.js';
+import { IUntitledTextEditorModelManager } from '../../untitled/common/untitledTextEditorService.js';
+import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { IProgress, IProgressStep } from '../../../../platform/progress/common/progress.js';
+import { IFileOperationUndoRedoInfo } from '../../workingCopy/common/workingCopyFileService.js';
 
 export const ITextFileService = createDecorator<ITextFileService>('textFileService');
 
@@ -96,7 +96,7 @@ export interface ITextFileService extends IDisposable {
 	 * Create files. If the file exists it will be overwritten with the contents if
 	 * the options enable to overwrite.
 	 */
-	create(operations: { resource: URI, value?: string | ITextSnapshot, options?: { overwrite?: boolean } }[], undoInfo?: IFileOperationUndoRedoInfo): Promise<readonly IFileStatWithMetadata[]>;
+	create(operations: { resource: URI; value?: string | ITextSnapshot; options?: { overwrite?: boolean } }[], undoInfo?: IFileOperationUndoRedoInfo): Promise<readonly IFileStatWithMetadata[]>;
 
 	/**
 	 * Returns the readable that uses the appropriate encoding. This method should
@@ -112,6 +112,8 @@ export interface ITextFileService extends IDisposable {
 	/**
 	 * Returns a stream of strings that uses the appropriate encoding. This method should
 	 * be used whenever a `VSBufferReadableStream` is being loaded from the file system.
+	 *
+	 * Will throw an error if `acceptTextOnly: true` for resources that seem to be binary.
 	 */
 	getDecodedStream(resource: URI, value: VSBufferReadableStream, options?: IReadTextFileEncodingOptions): Promise<ReadableStream<string>>;
 }
@@ -128,9 +130,11 @@ export interface IReadTextFileEncodingOptions {
 	 * The optional guessEncoding parameter allows to guess encoding from content of the file.
 	 */
 	readonly autoGuessEncoding?: boolean;
-}
 
-export interface IReadTextFileOptions extends IReadTextFileEncodingOptions, IReadFileStreamOptions {
+	/**
+	 * The optional candidateGuessEncodings parameter limits the allowed encodings to guess from.
+	 */
+	readonly candidateGuessEncodings?: string[];
 
 	/**
 	 * The optional acceptTextOnly parameter allows to fail this request early if the file
@@ -138,6 +142,8 @@ export interface IReadTextFileOptions extends IReadTextFileEncodingOptions, IRea
 	 */
 	readonly acceptTextOnly?: boolean;
 }
+
+export interface IReadTextFileOptions extends IReadTextFileEncodingOptions, IReadFileStreamOptions { }
 
 export interface IWriteTextFileOptions extends IWriteFileOptions {
 
@@ -177,6 +183,7 @@ export class TextFileOperationError extends FileOperationError {
 }
 
 export interface IResourceEncodings {
+	getPreferredReadEncoding(resource: URI): Promise<IResourceEncoding>;
 	getPreferredWriteEncoding(resource: URI, preferredEncoding?: string): Promise<IResourceEncoding>;
 }
 
@@ -193,7 +200,7 @@ export interface ISaveErrorHandler {
 	/**
 	 * Called whenever a save fails.
 	 */
-	onSaveError(error: Error, model: ITextFileEditorModel): void;
+	onSaveError(error: Error, model: ITextFileEditorModel, options: ITextFileSaveAsOptions): void;
 }
 
 /**
@@ -240,7 +247,7 @@ export const enum TextFileResolveReason {
 	OTHER = 3
 }
 
-interface IBaseTextFileContent extends IBaseStatWithMetadata {
+interface IBaseTextFileContent extends IBaseFileStatWithMetadata {
 
 	/**
 	 * The encoding of the content if known.
@@ -264,17 +271,12 @@ export interface ITextFileStreamContent extends IBaseTextFileContent {
 	readonly value: ITextBufferFactory;
 }
 
-export interface ITextFileEditorModelResolveOrCreateOptions {
+export interface ITextFileEditorModelResolveOrCreateOptions extends ITextFileResolveOptions {
 
 	/**
-	 * Context why the model is being resolved or created.
+	 * The language id to use for the model text content.
 	 */
-	readonly reason?: TextFileResolveReason;
-
-	/**
-	 * The language mode to use for the model text content.
-	 */
-	readonly mode?: string;
+	readonly languageId?: string;
 
 	/**
 	 * The encoding to use when resolving the model text content.
@@ -282,38 +284,54 @@ export interface ITextFileEditorModelResolveOrCreateOptions {
 	readonly encoding?: string;
 
 	/**
-	 * The contents to use for the model if known. If not
-	 * provided, the contents will be retrieved from the
-	 * underlying resource or backup if present.
-	 */
-	readonly contents?: ITextBufferFactory;
-
-	/**
 	 * If the model was already resolved before, allows to trigger
-	 * a reload of it to fetch the latest contents:
-	 * - async: resolve() will return immediately and trigger
-	 * a reload that will run in the background.
-	 * - sync: resolve() will only return resolved when the
-	 * model has finished reloading.
+	 * a reload of it to fetch the latest contents.
 	 */
 	readonly reload?: {
-		readonly async: boolean
-	};
 
-	/**
-	 * Allow to resolve a model even if we think it is a binary file.
-	 */
-	readonly allowBinary?: boolean;
+		/**
+		 * Controls whether the reload happens in the background
+		 * or whether `resolve` will await the reload to happen.
+		 */
+		readonly async: boolean;
+	};
 }
 
-export interface ITextFileSaveEvent {
+export interface ITextFileSaveEvent extends ITextFileEditorModelSaveEvent {
+
+	/**
+	 * The model that was saved.
+	 */
 	readonly model: ITextFileEditorModel;
-	readonly reason: SaveReason;
 }
 
 export interface ITextFileResolveEvent {
+
+	/**
+	 * The model that was resolved.
+	 */
 	readonly model: ITextFileEditorModel;
+
+	/**
+	 * The reason why the model was resolved.
+	 */
 	readonly reason: TextFileResolveReason;
+}
+
+export interface ITextFileSaveParticipantContext {
+
+	/**
+	 * The reason why the save was triggered.
+	 */
+	readonly reason: SaveReason;
+
+	/**
+	 * Only applies to when a text file was saved as, for
+	 * example when starting with untitled and saving. This
+	 * provides access to the initial resource the text
+	 * file had before.
+	 */
+	readonly savedFrom?: URI;
 }
 
 export interface ITextFileSaveParticipant {
@@ -324,7 +342,7 @@ export interface ITextFileSaveParticipant {
 	 */
 	participate(
 		model: ITextFileEditorModel,
-		context: { reason: SaveReason },
+		context: ITextFileSaveParticipantContext,
 		progress: IProgress<IProgressStep>,
 		token: CancellationToken
 	): Promise<void>;
@@ -335,6 +353,9 @@ export interface ITextFileEditorModelManager {
 	readonly onDidCreate: Event<ITextFileEditorModel>;
 	readonly onDidResolve: Event<ITextFileResolveEvent>;
 	readonly onDidChangeDirty: Event<ITextFileEditorModel>;
+	readonly onDidChangeReadonly: Event<ITextFileEditorModel>;
+	readonly onDidRemove: Event<URI>;
+	readonly onDidChangeOrphaned: Event<ITextFileEditorModel>;
 	readonly onDidChangeEncoding: Event<ITextFileEditorModel>;
 	readonly onDidSaveError: Event<ITextFileEditorModel>;
 	readonly onDidSave: Event<ITextFileSaveEvent>;
@@ -369,7 +390,7 @@ export interface ITextFileEditorModelManager {
 	/**
 	 * Runs the registered save participants on the provided model.
 	 */
-	runSaveParticipants(model: ITextFileEditorModel, context: { reason: SaveReason; }, token: CancellationToken): Promise<void>
+	runSaveParticipants(model: ITextFileEditorModel, context: ITextFileSaveParticipantContext, progress: IProgress<IProgressStep>, token: CancellationToken): Promise<void>;
 
 	/**
 	 * Waits for the model to be ready to be disposed. There may be conditions
@@ -407,6 +428,11 @@ export interface ITextFileSaveOptions extends ISaveOptions {
 export interface ITextFileSaveAsOptions extends ITextFileSaveOptions {
 
 	/**
+	 * Optional URI of the resource the text file is saved from if known.
+	 */
+	readonly from?: URI;
+
+	/**
 	 * Optional URI to use as suggested file path to save as.
 	 */
 	readonly suggestedTarget?: URI;
@@ -435,6 +461,12 @@ export interface ITextFileResolveOptions {
 	 * Context why the model is being resolved.
 	 */
 	readonly reason?: TextFileResolveReason;
+
+	/**
+	 * If provided, the size of the file will be checked against the limits
+	 * and an error will be thrown if any limit is exceeded.
+	 */
+	readonly limits?: IFileReadLimits;
 }
 
 export const enum EncodingMode {
@@ -463,17 +495,25 @@ export interface IEncodingSupport {
 	setEncoding(encoding: string, mode: EncodingMode): Promise<void>;
 }
 
-export interface IModeSupport {
+export interface ILanguageSupport {
 
 	/**
-	 * Sets the language mode of the object.
+	 * Sets the language id of the object.
 	 */
-	setMode(mode: string): void;
+	setLanguageId(languageId: string, source?: string): void;
 }
 
-export interface ITextFileEditorModel extends ITextEditorModel, IEncodingSupport, IModeSupport, IWorkingCopy {
+export interface ITextFileEditorModelSaveEvent extends IWorkingCopySaveEvent {
 
-	readonly onDidChangeContent: Event<void>;
+	/**
+	 * The resolved stat from the save operation.
+	 */
+	readonly stat: IFileStatWithMetadata;
+}
+
+export interface ITextFileEditorModel extends ITextEditorModel, IEncodingSupport, ILanguageSupport, IWorkingCopy {
+
+	readonly onDidSave: Event<ITextFileEditorModelSaveEvent>;
 	readonly onDidSaveError: Event<void>;
 	readonly onDidChangeOrphaned: Event<void>;
 	readonly onDidChangeReadonly: Event<void>;
@@ -484,14 +524,14 @@ export interface ITextFileEditorModel extends ITextEditorModel, IEncodingSupport
 
 	updatePreferredEncoding(encoding: string | undefined): void;
 
-	save(options?: ITextFileSaveOptions): Promise<boolean>;
+	save(options?: ITextFileSaveAsOptions): Promise<boolean>;
 	revert(options?: IRevertOptions): Promise<void>;
 
 	resolve(options?: ITextFileResolveOptions): Promise<void>;
 
 	isDirty(): this is IResolvedTextFileEditorModel;
 
-	getMode(): string | undefined;
+	getLanguageId(): string | undefined;
 
 	isResolved(): this is IResolvedTextFileEditorModel;
 }
@@ -499,7 +539,7 @@ export interface ITextFileEditorModel extends ITextEditorModel, IEncodingSupport
 export function isTextFileEditorModel(model: ITextEditorModel): model is ITextFileEditorModel {
 	const candidate = model as ITextFileEditorModel;
 
-	return areFunctions(candidate.setEncoding, candidate.getEncoding, candidate.save, candidate.revert, candidate.isDirty, candidate.getMode);
+	return areFunctions(candidate.setEncoding, candidate.getEncoding, candidate.save, candidate.revert, candidate.isDirty, candidate.getLanguageId);
 }
 
 export interface IResolvedTextFileEditorModel extends ITextFileEditorModel {

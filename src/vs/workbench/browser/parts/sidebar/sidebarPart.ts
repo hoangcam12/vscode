@@ -3,43 +3,37 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import 'vs/css!./media/sidebarpart';
-import { localize } from 'vs/nls';
-import { Registry } from 'vs/platform/registry/common/platform';
-import { CompositePart } from 'vs/workbench/browser/parts/compositePart';
-import { Viewlet, ViewletRegistry, Extensions as ViewletExtensions, ViewletDescriptor } from 'vs/workbench/browser/viewlet';
-import { Action2, registerAction2 } from 'vs/platform/actions/common/actions';
-import { IViewletService } from 'vs/workbench/services/viewlet/browser/viewlet';
-import { IWorkbenchLayoutService, Parts, Position as SideBarPosition } from 'vs/workbench/services/layout/browser/layoutService';
-import { IViewlet, SidebarFocusContext, ActiveViewletContext } from 'vs/workbench/common/viewlet';
-import { IStorageService } from 'vs/platform/storage/common/storage';
-import { IContextMenuService } from 'vs/platform/contextview/browser/contextView';
-import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
-import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
-import { KeyMod, KeyCode } from 'vs/base/common/keyCodes';
-import { IInstantiationService, ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
-import { Event, Emitter } from 'vs/base/common/event';
-import { IThemeService } from 'vs/platform/theme/common/themeService';
-import { contrastBorder } from 'vs/platform/theme/common/colorRegistry';
-import { SIDE_BAR_TITLE_FOREGROUND, SIDE_BAR_BACKGROUND, SIDE_BAR_FOREGROUND, SIDE_BAR_BORDER, SIDE_BAR_DRAG_AND_DROP_BACKGROUND } from 'vs/workbench/common/theme';
-import { INotificationService } from 'vs/platform/notification/common/notification';
-import { EventType, addDisposableListener, trackFocus } from 'vs/base/browser/dom';
-import { StandardMouseEvent } from 'vs/base/browser/mouseEvent';
-import { IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
-import { AnchorAlignment } from 'vs/base/browser/ui/contextview/contextview';
-import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
-import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
-import { LayoutPriority } from 'vs/base/browser/ui/grid/grid';
-import { assertIsDefined } from 'vs/base/common/types';
-import { CompositeDragAndDropObserver } from 'vs/workbench/browser/dnd';
-import { IViewDescriptorService, ViewContainerLocation } from 'vs/workbench/common/views';
-import { KeybindingWeight } from 'vs/platform/keybinding/common/keybindingsRegistry';
-import { CATEGORIES } from 'vs/workbench/common/actions';
-import { Gesture, EventType as GestureEventType } from 'vs/base/browser/touch';
+import './media/sidebarpart.css';
+import './sidebarActions.js';
+import { ActivityBarPosition, IWorkbenchLayoutService, LayoutSettings, Parts, Position as SideBarPosition } from '../../../services/layout/browser/layoutService.js';
+import { SidebarFocusContext, ActiveViewletContext } from '../../../common/contextkeys.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
+import { IContextMenuService } from '../../../../platform/contextview/browser/contextView.js';
+import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
+import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
+import { IThemeService } from '../../../../platform/theme/common/themeService.js';
+import { contrastBorder } from '../../../../platform/theme/common/colorRegistry.js';
+import { SIDE_BAR_TITLE_FOREGROUND, SIDE_BAR_BACKGROUND, SIDE_BAR_FOREGROUND, SIDE_BAR_BORDER, SIDE_BAR_DRAG_AND_DROP_BACKGROUND, ACTIVITY_BAR_BADGE_BACKGROUND, ACTIVITY_BAR_BADGE_FOREGROUND, ACTIVITY_BAR_TOP_FOREGROUND, ACTIVITY_BAR_TOP_ACTIVE_BORDER, ACTIVITY_BAR_TOP_INACTIVE_FOREGROUND, ACTIVITY_BAR_TOP_DRAG_AND_DROP_BORDER } from '../../../common/theme.js';
+import { INotificationService } from '../../../../platform/notification/common/notification.js';
+import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
+import { AnchorAlignment } from '../../../../base/browser/ui/contextview/contextview.js';
+import { IExtensionService } from '../../../services/extensions/common/extensions.js';
+import { LayoutPriority } from '../../../../base/browser/ui/grid/grid.js';
+import { assertIsDefined } from '../../../../base/common/types.js';
+import { IViewDescriptorService } from '../../../common/views.js';
+import { AbstractPaneCompositePart, CompositeBarPosition } from '../paneCompositePart.js';
+import { ActivityBarCompositeBar, ActivitybarPart } from '../activitybar/activitybarPart.js';
+import { ActionsOrientation } from '../../../../base/browser/ui/actionbar/actionbar.js';
+import { HoverPosition } from '../../../../base/browser/ui/hover/hoverWidget.js';
+import { IPaneCompositeBarOptions } from '../paneCompositeBar.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { Action2, IMenuService, registerAction2 } from '../../../../platform/actions/common/actions.js';
+import { Separator } from '../../../../base/common/actions.js';
+import { ToggleActivityBarVisibilityActionId } from '../../actions/layoutActions.js';
+import { localize2 } from '../../../../nls.js';
+import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 
-export class SidebarPart extends CompositePart<Viewlet> implements IViewletService {
-
-	declare readonly _serviceBrand: undefined;
+export class SidebarPart extends AbstractPaneCompositePart {
 
 	static readonly activeViewletSettingsKey = 'workbench.sidebar.activeviewletid';
 
@@ -49,13 +43,12 @@ export class SidebarPart extends CompositePart<Viewlet> implements IViewletServi
 	readonly maximumWidth: number = Number.POSITIVE_INFINITY;
 	readonly minimumHeight: number = 0;
 	readonly maximumHeight: number = Number.POSITIVE_INFINITY;
+	override get snap(): boolean { return true; }
 
 	readonly priority: LayoutPriority = LayoutPriority.Low;
 
-	readonly snap = true;
-
 	get preferredWidth(): number | undefined {
-		const viewlet = this.getActiveViewlet();
+		const viewlet = this.getActivePaneComposite();
 
 		if (!viewlet) {
 			return;
@@ -69,129 +62,78 @@ export class SidebarPart extends CompositePart<Viewlet> implements IViewletServi
 		return Math.max(width, 300);
 	}
 
+	private readonly activityBarPart = this._register(this.instantiationService.createInstance(ActivitybarPart, this));
+
 	//#endregion
-
-	get onDidViewletRegister(): Event<ViewletDescriptor> { return <Event<ViewletDescriptor>>this.viewletRegistry.onDidRegister; }
-
-	private _onDidViewletDeregister = this._register(new Emitter<ViewletDescriptor>());
-	readonly onDidViewletDeregister = this._onDidViewletDeregister.event;
-
-	get onDidViewletOpen(): Event<IViewlet> { return Event.map(this.onDidCompositeOpen.event, compositeEvent => <IViewlet>compositeEvent.composite); }
-	get onDidViewletClose(): Event<IViewlet> { return this.onDidCompositeClose.event as Event<IViewlet>; }
-
-	private readonly viewletRegistry = Registry.as<ViewletRegistry>(ViewletExtensions.Viewlets);
-
-	private readonly sideBarFocusContextKey = SidebarFocusContext.bindTo(this.contextKeyService);
-	private readonly activeViewletContextKey = ActiveViewletContext.bindTo(this.contextKeyService);
-
-	private blockOpeningViewlet = false;
 
 	constructor(
 		@INotificationService notificationService: INotificationService,
 		@IStorageService storageService: IStorageService,
-		@ITelemetryService telemetryService: ITelemetryService,
 		@IContextMenuService contextMenuService: IContextMenuService,
 		@IWorkbenchLayoutService layoutService: IWorkbenchLayoutService,
 		@IKeybindingService keybindingService: IKeybindingService,
+		@IHoverService hoverService: IHoverService,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@IThemeService themeService: IThemeService,
-		@IViewDescriptorService private readonly viewDescriptorService: IViewDescriptorService,
-		@IContextKeyService private readonly contextKeyService: IContextKeyService,
-		@IExtensionService private readonly extensionService: IExtensionService
+		@IViewDescriptorService viewDescriptorService: IViewDescriptorService,
+		@IContextKeyService contextKeyService: IContextKeyService,
+		@IExtensionService extensionService: IExtensionService,
+		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@IMenuService menuService: IMenuService,
 	) {
 		super(
-			notificationService,
-			storageService,
-			telemetryService,
-			contextMenuService,
-			layoutService,
-			keybindingService,
-			instantiationService,
-			themeService,
-			Registry.as<ViewletRegistry>(ViewletExtensions.Viewlets),
+			Parts.SIDEBAR_PART,
+			{ hasTitle: true, borderWidth: () => (this.getColor(SIDE_BAR_BORDER) || this.getColor(contrastBorder)) ? 1 : 0 },
 			SidebarPart.activeViewletSettingsKey,
-			viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.Sidebar)!.id,
+			ActiveViewletContext.bindTo(contextKeyService),
+			SidebarFocusContext.bindTo(contextKeyService),
 			'sideBar',
 			'viewlet',
 			SIDE_BAR_TITLE_FOREGROUND,
-			Parts.SIDEBAR_PART,
-			{ hasTitle: true, borderWidth: () => (this.getColor(SIDE_BAR_BORDER) || this.getColor(contrastBorder)) ? 1 : 0 }
+			notificationService,
+			storageService,
+			contextMenuService,
+			layoutService,
+			keybindingService,
+			hoverService,
+			instantiationService,
+			themeService,
+			viewDescriptorService,
+			contextKeyService,
+			extensionService,
+			menuService,
 		);
 
-		this.registerListeners();
-	}
-
-	private registerListeners(): void {
-
-		// Viewlet open
-		this._register(this.onDidViewletOpen(viewlet => {
-			this.activeViewletContextKey.set(viewlet.getId());
-		}));
-
-		// Viewlet close
-		this._register(this.onDidViewletClose(viewlet => {
-			if (this.activeViewletContextKey.get() === viewlet.getId()) {
-				this.activeViewletContextKey.reset();
+		this.rememberActivityBarVisiblePosition();
+		this._register(configurationService.onDidChangeConfiguration(e => {
+			if (e.affectsConfiguration(LayoutSettings.ACTIVITY_BAR_LOCATION)) {
+				this.onDidChangeActivityBarLocation();
 			}
 		}));
 
-		// Viewlet deregister
-		this._register(this.registry.onDidDeregister(async (viewletDescriptor: ViewletDescriptor) => {
-
-			const activeContainers = this.viewDescriptorService.getViewContainersByLocation(ViewContainerLocation.Sidebar)
-				.filter(container => this.viewDescriptorService.getViewContainerModel(container).activeViewDescriptors.length > 0);
-
-			if (activeContainers.length) {
-				if (this.getActiveComposite()?.getId() === viewletDescriptor.id) {
-					const defaultViewletId = this.viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.Sidebar)?.id;
-					const containerToOpen = activeContainers.filter(c => c.id === defaultViewletId)[0] || activeContainers[0];
-					await this.openViewlet(containerToOpen.id);
-				}
-			} else {
-				this.layoutService.setSideBarHidden(true);
-			}
-
-			this.removeComposite(viewletDescriptor.id);
-			this._onDidViewletDeregister.fire(viewletDescriptor);
-		}));
+		this.registerActions();
 	}
 
-	override create(parent: HTMLElement): void {
-		this.element = parent;
+	private onDidChangeActivityBarLocation(): void {
+		this.activityBarPart.hide();
 
-		super.create(parent);
+		this.updateCompositeBar();
 
-		const focusTracker = this._register(trackFocus(parent));
-		this._register(focusTracker.onDidFocus(() => this.sideBarFocusContextKey.set(true)));
-		this._register(focusTracker.onDidBlur(() => this.sideBarFocusContextKey.set(false)));
-	}
+		const id = this.getActiveComposite()?.getId();
+		if (id) {
+			this.onTitleAreaUpdate(id);
+		}
 
-	override createTitleArea(parent: HTMLElement): HTMLElement {
-		const titleArea = super.createTitleArea(parent);
+		if (this.shouldShowActivityBar()) {
+			this.activityBarPart.show();
+		}
 
-		this._register(addDisposableListener(titleArea, EventType.CONTEXT_MENU, e => {
-			this.onTitleAreaContextMenu(new StandardMouseEvent(e));
-		}));
-		this._register(Gesture.addTarget(titleArea));
-		this._register(addDisposableListener(titleArea, GestureEventType.Contextmenu, e => {
-			this.onTitleAreaContextMenu(new StandardMouseEvent(e));
-		}));
-
-		this.titleLabelElement!.draggable = true;
-
-		const draggedItemProvider = (): { type: 'view' | 'composite', id: string } => {
-			const activeViewlet = this.getActiveViewlet()!;
-			return { type: 'composite', id: activeViewlet.getId() };
-		};
-
-		this._register(CompositeDragAndDropObserver.INSTANCE.registerDraggable(this.titleLabelElement!, draggedItemProvider, {}));
-		return titleArea;
+		this.rememberActivityBarVisiblePosition();
 	}
 
 	override updateStyles(): void {
 		super.updateStyles();
 
-		// Part container
 		const container = assertIsDefined(this.getContainer());
 
 		container.style.backgroundColor = this.getColor(SIDE_BAR_BACKGROUND) || '';
@@ -208,96 +150,138 @@ export class SidebarPart extends CompositePart<Viewlet> implements IViewletServi
 		container.style.outlineColor = this.getColor(SIDE_BAR_DRAG_AND_DROP_BACKGROUND) ?? '';
 	}
 
-	override layout(width: number, height: number): void {
+	override layout(width: number, height: number, top: number, left: number): void {
 		if (!this.layoutService.isVisible(Parts.SIDEBAR_PART)) {
 			return;
 		}
 
-		super.layout(width, height);
-	}
-
-	// Viewlet service
-
-	getActiveViewlet(): IViewlet | undefined {
-		return <IViewlet>this.getActiveComposite();
-	}
-
-	getLastActiveViewletId(): string {
-		return this.getLastActiveCompositetId();
-	}
-
-	hideActiveViewlet(): void {
-		this.hideActiveComposite();
-	}
-
-	async openViewlet(id: string | undefined, focus?: boolean): Promise<IViewlet | undefined> {
-		if (typeof id === 'string' && this.getViewlet(id)) {
-			return this.doOpenViewlet(id, focus);
-		}
-
-		await this.extensionService.whenInstalledExtensionsRegistered();
-
-		if (typeof id === 'string' && this.getViewlet(id)) {
-			return this.doOpenViewlet(id, focus);
-		}
-
-		return undefined;
-	}
-
-	getViewlets(): ViewletDescriptor[] {
-		return this.viewletRegistry.getViewlets().sort((v1, v2) => {
-			if (typeof v1.order !== 'number') {
-				return -1;
-			}
-
-			if (typeof v2.order !== 'number') {
-				return 1;
-			}
-
-			return v1.order - v2.order;
-		});
-	}
-
-	getViewlet(id: string): ViewletDescriptor {
-		return this.getViewlets().filter(viewlet => viewlet.id === id)[0];
-	}
-
-	private doOpenViewlet(id: string, focus?: boolean): Viewlet | undefined {
-		if (this.blockOpeningViewlet) {
-			return undefined; // Workaround against a potential race condition
-		}
-
-		// First check if sidebar is hidden and show if so
-		if (!this.layoutService.isVisible(Parts.SIDEBAR_PART)) {
-			try {
-				this.blockOpeningViewlet = true;
-				this.layoutService.setSideBarHidden(false);
-			} finally {
-				this.blockOpeningViewlet = false;
-			}
-		}
-
-		return this.openComposite(id, focus) as Viewlet;
+		super.layout(width, height, top, left);
 	}
 
 	protected override getTitleAreaDropDownAnchorAlignment(): AnchorAlignment {
 		return this.layoutService.getSideBarPosition() === SideBarPosition.LEFT ? AnchorAlignment.LEFT : AnchorAlignment.RIGHT;
 	}
 
-	private onTitleAreaContextMenu(event: StandardMouseEvent): void {
-		const activeViewlet = this.getActiveViewlet() as Viewlet;
-		if (activeViewlet) {
-			const contextMenuActions = activeViewlet ? activeViewlet.getContextMenuActions() : [];
-			if (contextMenuActions.length) {
-				const anchor: { x: number, y: number } = { x: event.posx, y: event.posy };
-				this.contextMenuService.showContextMenu({
-					getAnchor: () => anchor,
-					getActions: () => contextMenuActions.slice(),
-					getActionViewItem: action => this.actionViewItemProvider(action),
-					actionRunner: activeViewlet.getActionRunner()
+	protected override createCompositeBar(): ActivityBarCompositeBar {
+		return this.instantiationService.createInstance(ActivityBarCompositeBar, this.getCompositeBarOptions(), this.partId, this, false);
+	}
+
+	protected getCompositeBarOptions(): IPaneCompositeBarOptions {
+		return {
+			partContainerClass: 'sidebar',
+			pinnedViewContainersKey: ActivitybarPart.pinnedViewContainersKey,
+			placeholderViewContainersKey: ActivitybarPart.placeholderViewContainersKey,
+			viewContainersWorkspaceStateKey: ActivitybarPart.viewContainersWorkspaceStateKey,
+			icon: true,
+			orientation: ActionsOrientation.HORIZONTAL,
+			recomputeSizes: true,
+			activityHoverOptions: {
+				position: () => this.getCompositeBarPosition() === CompositeBarPosition.BOTTOM ? HoverPosition.ABOVE : HoverPosition.BELOW,
+			},
+			fillExtraContextMenuActions: actions => {
+				const viewsSubmenuAction = this.getViewsSubmenuAction();
+				if (viewsSubmenuAction) {
+					actions.push(new Separator());
+					actions.push(viewsSubmenuAction);
+				}
+			},
+			compositeSize: 0,
+			iconSize: 16,
+			overflowActionSize: 30,
+			colors: theme => ({
+				activeBackgroundColor: theme.getColor(SIDE_BAR_BACKGROUND),
+				inactiveBackgroundColor: theme.getColor(SIDE_BAR_BACKGROUND),
+				activeBorderBottomColor: theme.getColor(ACTIVITY_BAR_TOP_ACTIVE_BORDER),
+				activeForegroundColor: theme.getColor(ACTIVITY_BAR_TOP_FOREGROUND),
+				inactiveForegroundColor: theme.getColor(ACTIVITY_BAR_TOP_INACTIVE_FOREGROUND),
+				badgeBackground: theme.getColor(ACTIVITY_BAR_BADGE_BACKGROUND),
+				badgeForeground: theme.getColor(ACTIVITY_BAR_BADGE_FOREGROUND),
+				dragAndDropBorder: theme.getColor(ACTIVITY_BAR_TOP_DRAG_AND_DROP_BORDER)
+			}),
+			compact: true
+		};
+	}
+
+	protected shouldShowCompositeBar(): boolean {
+		const activityBarPosition = this.configurationService.getValue<ActivityBarPosition>(LayoutSettings.ACTIVITY_BAR_LOCATION);
+		return activityBarPosition === ActivityBarPosition.TOP || activityBarPosition === ActivityBarPosition.BOTTOM;
+	}
+
+	private shouldShowActivityBar(): boolean {
+		if (this.shouldShowCompositeBar()) {
+			return false;
+		}
+
+		return this.configurationService.getValue(LayoutSettings.ACTIVITY_BAR_LOCATION) !== ActivityBarPosition.HIDDEN;
+	}
+
+	protected getCompositeBarPosition(): CompositeBarPosition {
+		const activityBarPosition = this.configurationService.getValue<ActivityBarPosition>(LayoutSettings.ACTIVITY_BAR_LOCATION);
+		switch (activityBarPosition) {
+			case ActivityBarPosition.TOP: return CompositeBarPosition.TOP;
+			case ActivityBarPosition.BOTTOM: return CompositeBarPosition.BOTTOM;
+			case ActivityBarPosition.HIDDEN:
+			case ActivityBarPosition.DEFAULT: // noop
+			default: return CompositeBarPosition.TITLE;
+		}
+	}
+
+	private rememberActivityBarVisiblePosition(): void {
+		const activityBarPosition = this.configurationService.getValue<string>(LayoutSettings.ACTIVITY_BAR_LOCATION);
+		if (activityBarPosition !== ActivityBarPosition.HIDDEN) {
+			this.storageService.store(LayoutSettings.ACTIVITY_BAR_LOCATION, activityBarPosition, StorageScope.PROFILE, StorageTarget.USER);
+		}
+	}
+
+	private getRememberedActivityBarVisiblePosition(): ActivityBarPosition {
+		const activityBarPosition = this.storageService.get(LayoutSettings.ACTIVITY_BAR_LOCATION, StorageScope.PROFILE);
+		switch (activityBarPosition) {
+			case ActivityBarPosition.TOP: return ActivityBarPosition.TOP;
+			case ActivityBarPosition.BOTTOM: return ActivityBarPosition.BOTTOM;
+			default: return ActivityBarPosition.DEFAULT;
+		}
+	}
+
+	override getPinnedPaneCompositeIds(): string[] {
+		return this.shouldShowCompositeBar() ? super.getPinnedPaneCompositeIds() : this.activityBarPart.getPinnedPaneCompositeIds();
+	}
+
+	override getVisiblePaneCompositeIds(): string[] {
+		return this.shouldShowCompositeBar() ? super.getVisiblePaneCompositeIds() : this.activityBarPart.getVisiblePaneCompositeIds();
+	}
+
+	async focusActivityBar(): Promise<void> {
+		if (this.configurationService.getValue(LayoutSettings.ACTIVITY_BAR_LOCATION) === ActivityBarPosition.HIDDEN) {
+			await this.configurationService.updateValue(LayoutSettings.ACTIVITY_BAR_LOCATION, this.getRememberedActivityBarVisiblePosition());
+
+			this.onDidChangeActivityBarLocation();
+		}
+
+		if (this.shouldShowCompositeBar()) {
+			this.focusCompositeBar();
+		} else {
+			if (!this.layoutService.isVisible(Parts.ACTIVITYBAR_PART)) {
+				this.layoutService.setPartHidden(false, Parts.ACTIVITYBAR_PART);
+			}
+
+			this.activityBarPart.show(true);
+		}
+	}
+
+	private registerActions(): void {
+		const that = this;
+		this._register(registerAction2(class extends Action2 {
+			constructor() {
+				super({
+					id: ToggleActivityBarVisibilityActionId,
+					title: localize2('toggleActivityBar', "Toggle Activity Bar Visibility"),
 				});
 			}
-		}
+			run(): Promise<void> {
+				const value = that.configurationService.getValue(LayoutSettings.ACTIVITY_BAR_LOCATION) === ActivityBarPosition.HIDDEN ? that.getRememberedActivityBarVisiblePosition() : ActivityBarPosition.HIDDEN;
+				return that.configurationService.updateValue(LayoutSettings.ACTIVITY_BAR_LOCATION, value);
+			}
+		}));
 	}
 
 	toJSON(): object {
@@ -306,41 +290,3 @@ export class SidebarPart extends CompositePart<Viewlet> implements IViewletServi
 		};
 	}
 }
-
-class FocusSideBarAction extends Action2 {
-
-	constructor() {
-		super({
-			id: 'workbench.action.focusSideBar',
-			title: { value: localize('focusSideBar', "Focus into Side Bar"), original: 'Focus into Side Bar' },
-			category: CATEGORIES.View,
-			f1: true,
-			keybinding: {
-				weight: KeybindingWeight.WorkbenchContrib,
-				when: null,
-				primary: KeyMod.CtrlCmd | KeyCode.KEY_0
-			}
-		});
-	}
-
-	async run(accessor: ServicesAccessor): Promise<void> {
-		const layoutService = accessor.get(IWorkbenchLayoutService);
-		const viewletService = accessor.get(IViewletService);
-
-		// Show side bar
-		if (!layoutService.isVisible(Parts.SIDEBAR_PART)) {
-			layoutService.setSideBarHidden(false);
-			return;
-		}
-
-		// Focus into active viewlet
-		const viewlet = viewletService.getActiveViewlet();
-		if (viewlet) {
-			viewlet.focus();
-		}
-	}
-}
-
-registerAction2(FocusSideBarAction);
-
-registerSingleton(IViewletService, SidebarPart);

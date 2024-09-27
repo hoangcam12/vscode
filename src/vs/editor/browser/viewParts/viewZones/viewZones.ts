@@ -3,27 +3,28 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { FastDomNode, createFastDomNode } from 'vs/base/browser/fastDomNode';
-import { onUnexpectedError } from 'vs/base/common/errors';
-import { IViewZone, IViewZoneChangeAccessor } from 'vs/editor/browser/editorBrowser';
-import { ViewPart } from 'vs/editor/browser/view/viewPart';
-import { Position } from 'vs/editor/common/core/position';
-import { RenderingContext, RestrictedRenderingContext } from 'vs/editor/common/view/renderingContext';
-import { ViewContext } from 'vs/editor/common/view/viewContext';
-import * as viewEvents from 'vs/editor/common/view/viewEvents';
-import { IViewWhitespaceViewportData } from 'vs/editor/common/viewModel/viewModel';
-import { EditorOption } from 'vs/editor/common/config/editorOptions';
-import { IWhitespaceChangeAccessor, IEditorWhitespace } from 'vs/editor/common/viewLayout/linesLayout';
+import { FastDomNode, createFastDomNode } from '../../../../base/browser/fastDomNode.js';
+import { onUnexpectedError } from '../../../../base/common/errors.js';
+import { IViewZone, IViewZoneChangeAccessor } from '../../editorBrowser.js';
+import { ViewPart } from '../../view/viewPart.js';
+import { Position } from '../../../common/core/position.js';
+import { RenderingContext, RestrictedRenderingContext } from '../../view/renderingContext.js';
+import { ViewContext } from '../../../common/viewModel/viewContext.js';
+import * as viewEvents from '../../../common/viewEvents.js';
+import { IEditorWhitespace, IViewWhitespaceViewportData, IWhitespaceChangeAccessor } from '../../../common/viewModel.js';
+import { EditorOption } from '../../../common/config/editorOptions.js';
 
-export interface IMyViewZone {
+interface IMyViewZone {
 	whitespaceId: string;
 	delegate: IViewZone;
+	isInHiddenArea: boolean;
 	isVisible: boolean;
 	domNode: FastDomNode<HTMLElement>;
 	marginDomNode: FastDomNode<HTMLElement> | null;
 }
 
 interface IComputedViewZoneProps {
+	isInHiddenArea: boolean;
 	afterViewLineNumber: number;
 	heightInPx: number;
 	minWidthInPx: number;
@@ -31,9 +32,14 @@ interface IComputedViewZoneProps {
 
 const invalidFunc = () => { throw new Error(`Invalid change accessor`); };
 
+/**
+ * A view zone is a rectangle that is a section that is inserted into the editor
+ * lines that can be used for various purposes such as showing a diffs, peeking
+ * an implementation, etc.
+ */
 export class ViewZones extends ViewPart {
 
-	private _zones: { [id: string]: IMyViewZone; };
+	private _zones: { [id: string]: IMyViewZone };
 	private _lineHeight: number;
 	private _contentWidth: number;
 	private _contentLeft: number;
@@ -80,12 +86,13 @@ export class ViewZones extends ViewPart {
 			oldWhitespaces.set(whitespace.id, whitespace);
 		}
 		let hadAChange = false;
-		this._context.model.changeWhitespace((whitespaceAccessor: IWhitespaceChangeAccessor) => {
+		this._context.viewModel.changeWhitespace((whitespaceAccessor: IWhitespaceChangeAccessor) => {
 			const keys = Object.keys(this._zones);
 			for (let i = 0, len = keys.length; i < len; i++) {
 				const id = keys[i];
 				const zone = this._zones[id];
 				const props = this._computeWhitespaceProps(zone.delegate);
+				zone.isInHiddenArea = props.isInHiddenArea;
 				const oldWhitespace = oldWhitespaces.get(id);
 				if (oldWhitespace && (oldWhitespace.afterLineNumber !== props.afterViewLineNumber || oldWhitespace.height !== props.heightInPx)) {
 					whitespaceAccessor.changeOneWhitespace(id, props.afterViewLineNumber, props.heightInPx);
@@ -135,17 +142,13 @@ export class ViewZones extends ViewPart {
 	// ---- end view event handlers
 
 	private _getZoneOrdinal(zone: IViewZone): number {
-
-		if (typeof zone.afterColumn !== 'undefined') {
-			return zone.afterColumn;
-		}
-
-		return 10000;
+		return zone.ordinal ?? zone.afterColumn ?? 10000;
 	}
 
 	private _computeWhitespaceProps(zone: IViewZone): IComputedViewZoneProps {
 		if (zone.afterLineNumber === 0) {
 			return {
+				isInHiddenArea: false,
 				afterViewLineNumber: 0,
 				heightInPx: this._heightInPixels(zone),
 				minWidthInPx: this._minWidthInPixels(zone)
@@ -154,38 +157,39 @@ export class ViewZones extends ViewPart {
 
 		let zoneAfterModelPosition: Position;
 		if (typeof zone.afterColumn !== 'undefined') {
-			zoneAfterModelPosition = this._context.model.validateModelPosition({
+			zoneAfterModelPosition = this._context.viewModel.model.validatePosition({
 				lineNumber: zone.afterLineNumber,
 				column: zone.afterColumn
 			});
 		} else {
-			const validAfterLineNumber = this._context.model.validateModelPosition({
+			const validAfterLineNumber = this._context.viewModel.model.validatePosition({
 				lineNumber: zone.afterLineNumber,
 				column: 1
 			}).lineNumber;
 
 			zoneAfterModelPosition = new Position(
 				validAfterLineNumber,
-				this._context.model.getModelLineMaxColumn(validAfterLineNumber)
+				this._context.viewModel.model.getLineMaxColumn(validAfterLineNumber)
 			);
 		}
 
 		let zoneBeforeModelPosition: Position;
-		if (zoneAfterModelPosition.column === this._context.model.getModelLineMaxColumn(zoneAfterModelPosition.lineNumber)) {
-			zoneBeforeModelPosition = this._context.model.validateModelPosition({
+		if (zoneAfterModelPosition.column === this._context.viewModel.model.getLineMaxColumn(zoneAfterModelPosition.lineNumber)) {
+			zoneBeforeModelPosition = this._context.viewModel.model.validatePosition({
 				lineNumber: zoneAfterModelPosition.lineNumber + 1,
 				column: 1
 			});
 		} else {
-			zoneBeforeModelPosition = this._context.model.validateModelPosition({
+			zoneBeforeModelPosition = this._context.viewModel.model.validatePosition({
 				lineNumber: zoneAfterModelPosition.lineNumber,
 				column: zoneAfterModelPosition.column + 1
 			});
 		}
 
-		const viewPosition = this._context.model.coordinatesConverter.convertModelPositionToViewPosition(zoneAfterModelPosition);
-		const isVisible = this._context.model.coordinatesConverter.modelPositionIsVisible(zoneBeforeModelPosition);
+		const viewPosition = this._context.viewModel.coordinatesConverter.convertModelPositionToViewPosition(zoneAfterModelPosition, zone.afterColumnAffinity, true);
+		const isVisible = zone.showInHiddenAreas || this._context.viewModel.coordinatesConverter.modelPositionIsVisible(zoneBeforeModelPosition);
 		return {
+			isInHiddenArea: !isVisible,
 			afterViewLineNumber: viewPosition.lineNumber,
 			heightInPx: (isVisible ? this._heightInPixels(zone) : 0),
 			minWidthInPx: this._minWidthInPixels(zone)
@@ -195,7 +199,7 @@ export class ViewZones extends ViewPart {
 	public changeViewZones(callback: (changeAccessor: IViewZoneChangeAccessor) => any): boolean {
 		let zonesHaveChanged = false;
 
-		this._context.model.changeWhitespace((whitespaceAccessor: IWhitespaceChangeAccessor) => {
+		this._context.viewModel.changeWhitespace((whitespaceAccessor: IWhitespaceChangeAccessor) => {
 
 			const changeAccessor: IViewZoneChangeAccessor = {
 				addZone: (zone: IViewZone): string => {
@@ -234,6 +238,7 @@ export class ViewZones extends ViewPart {
 		const myZone: IMyViewZone = {
 			whitespaceId: whitespaceId,
 			delegate: zone,
+			isInHiddenArea: props.isInHiddenArea,
 			isVisible: false,
 			domNode: createFastDomNode(zone.domNode),
 			marginDomNode: zone.marginDomNode ? createFastDomNode(zone.marginDomNode) : null
@@ -271,12 +276,12 @@ export class ViewZones extends ViewPart {
 
 			zone.domNode.removeAttribute('monaco-visible-view-zone');
 			zone.domNode.removeAttribute('monaco-view-zone');
-			zone.domNode.domNode.parentNode!.removeChild(zone.domNode.domNode);
+			zone.domNode.domNode.remove();
 
 			if (zone.marginDomNode) {
 				zone.marginDomNode.removeAttribute('monaco-visible-view-zone');
 				zone.marginDomNode.removeAttribute('monaco-view-zone');
-				zone.marginDomNode.domNode.parentNode!.removeChild(zone.marginDomNode.domNode);
+				zone.marginDomNode.domNode.remove();
 			}
 
 			this.setShouldRender();
@@ -290,6 +295,7 @@ export class ViewZones extends ViewPart {
 		if (this._zones.hasOwnProperty(id)) {
 			const zone = this._zones[id];
 			const props = this._computeWhitespaceProps(zone.delegate);
+			zone.isInHiddenArea = props.isInHiddenArea;
 			// const newOrdinal = this._getZoneOrdinal(zone.delegate);
 			whitespaceAccessor.changeOneWhitespace(zone.whitespaceId, props.afterViewLineNumber, props.heightInPx);
 			// TODO@Alex: change `newOrdinal` too
@@ -353,11 +359,14 @@ export class ViewZones extends ViewPart {
 
 	public render(ctx: RestrictedRenderingContext): void {
 		const visibleWhitespaces = ctx.viewportData.whitespaceViewportData;
-		const visibleZones: { [id: string]: IViewWhitespaceViewportData; } = {};
+		const visibleZones: { [id: string]: IViewWhitespaceViewportData } = {};
 
 		let hasVisibleZone = false;
-		for (let i = 0, len = visibleWhitespaces.length; i < len; i++) {
-			visibleZones[visibleWhitespaces[i].id] = visibleWhitespaces[i];
+		for (const visibleWhitespace of visibleWhitespaces) {
+			if (this._zones[visibleWhitespace.id].isInHiddenArea) {
+				continue;
+			}
+			visibleZones[visibleWhitespace.id] = visibleWhitespace;
 			hasVisibleZone = true;
 		}
 

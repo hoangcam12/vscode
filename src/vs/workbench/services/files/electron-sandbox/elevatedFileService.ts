@@ -3,15 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { VSBuffer, VSBufferReadable, VSBufferReadableStream } from 'vs/base/common/buffer';
-import { Schemas } from 'vs/base/common/network';
-import { join } from 'vs/base/common/path';
-import { URI } from 'vs/base/common/uri';
-import { IFileService, IFileStatWithMetadata, IWriteFileOptions } from 'vs/platform/files/common/files';
-import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
-import { INativeHostService } from 'vs/platform/native/electron-sandbox/native';
-import { INativeWorkbenchEnvironmentService } from 'vs/workbench/services/environment/electron-sandbox/environmentService';
-import { IElevatedFileService } from 'vs/workbench/services/files/common/elevatedFileService';
+import { VSBuffer, VSBufferReadable, VSBufferReadableStream } from '../../../../base/common/buffer.js';
+import { randomPath } from '../../../../base/common/extpath.js';
+import { Schemas } from '../../../../base/common/network.js';
+import { URI } from '../../../../base/common/uri.js';
+import { IFileService, IFileStatWithMetadata, IWriteFileOptions } from '../../../../platform/files/common/files.js';
+import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
+import { INativeHostService } from '../../../../platform/native/common/native.js';
+import { INativeWorkbenchEnvironmentService } from '../../environment/electron-sandbox/environmentService.js';
+import { IElevatedFileService } from '../common/elevatedFileService.js';
 
 export class NativeElevatedFileService implements IElevatedFileService {
 
@@ -32,7 +32,7 @@ export class NativeElevatedFileService implements IElevatedFileService {
 	}
 
 	async writeFileElevated(resource: URI, value: VSBuffer | VSBufferReadable | VSBufferReadableStream, options?: IWriteFileOptions): Promise<IFileStatWithMetadata> {
-		const source = URI.file(join(this.environmentService.userDataPath, `code-elevated-${Math.random().toString(36).replace(/[^a-z]+/g, '').substr(0, 6)}`));
+		const source = URI.file(randomPath(this.environmentService.userDataPath, 'code-elevated'));
 		try {
 			// write into a tmp file first
 			await this.fileService.writeFile(source, value, options);
@@ -49,4 +49,4 @@ export class NativeElevatedFileService implements IElevatedFileService {
 	}
 }
 
-registerSingleton(IElevatedFileService, NativeElevatedFileService);
+registerSingleton(IElevatedFileService, NativeElevatedFileService, InstantiationType.Delayed);

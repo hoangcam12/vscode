@@ -3,15 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Emitter, Event } from 'vs/base/common/event';
-import { Disposable, dispose, IDisposable } from 'vs/base/common/lifecycle';
-import { ResourceMap } from 'vs/base/common/map';
-import { Promises } from 'vs/base/common/async';
-import { IFileService } from 'vs/platform/files/common/files';
-import { URI } from 'vs/base/common/uri';
-import { ILogService } from 'vs/platform/log/common/log';
-import { IWorkingCopyBackupService } from 'vs/workbench/services/workingCopy/common/workingCopyBackup';
-import { IFileWorkingCopy, IFileWorkingCopyModel } from 'vs/workbench/services/workingCopy/common/fileWorkingCopy';
+import { Emitter, Event } from '../../../../base/common/event.js';
+import { Disposable, dispose, IDisposable } from '../../../../base/common/lifecycle.js';
+import { ResourceMap } from '../../../../base/common/map.js';
+import { Promises } from '../../../../base/common/async.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
+import { URI } from '../../../../base/common/uri.js';
+import { ILogService } from '../../../../platform/log/common/log.js';
+import { IWorkingCopyBackupService } from './workingCopyBackup.js';
+import { IFileWorkingCopy, IFileWorkingCopyModel } from './fileWorkingCopy.js';
 
 export interface IBaseFileWorkingCopyManager<M extends IFileWorkingCopyModel, W extends IFileWorkingCopy<M>> extends IDisposable {
 
@@ -73,7 +73,7 @@ export abstract class BaseFileWorkingCopyManager<M extends IFileWorkingCopyModel
 		// Add to our working copy map
 		this.mapResourceToWorkingCopy.set(resource, workingCopy);
 
-		// Update our dipsose listener to remove it on dispose
+		// Update our dispose listener to remove it on dispose
 		this.mapResourceToDisposeListener.get(resource)?.dispose();
 		this.mapResourceToDisposeListener.set(resource, workingCopy.onWillDispose(() => this.remove(resource)));
 
@@ -81,7 +81,7 @@ export abstract class BaseFileWorkingCopyManager<M extends IFileWorkingCopyModel
 		this._onDidCreate.fire(workingCopy);
 	}
 
-	protected remove(resource: URI): void {
+	protected remove(resource: URI): boolean {
 
 		// Dispose any existing listener
 		const disposeListener = this.mapResourceToDisposeListener.get(resource);
@@ -91,7 +91,7 @@ export abstract class BaseFileWorkingCopyManager<M extends IFileWorkingCopyModel
 		}
 
 		// Remove from our working copy map
-		this.mapResourceToWorkingCopy.delete(resource);
+		return this.mapResourceToWorkingCopy.delete(resource);
 	}
 
 	//#region Get / Get all
@@ -149,15 +149,15 @@ export abstract class BaseFileWorkingCopyManager<M extends IFileWorkingCopyModel
 	private async saveWithFallback(workingCopy: W): Promise<void> {
 
 		// First try regular save
-		let saveFailed = false;
+		let saveSuccess = false;
 		try {
-			await workingCopy.save();
+			saveSuccess = await workingCopy.save();
 		} catch (error) {
-			saveFailed = true;
+			// Ignore
 		}
 
 		// Then fallback to backup if that exists
-		if (saveFailed || workingCopy.isDirty()) {
+		if (!saveSuccess || workingCopy.isDirty()) {
 			const backup = await this.workingCopyBackupService.resolve(workingCopy);
 			if (backup) {
 				await this.fileService.writeFile(workingCopy.resource, backup.value, { unlock: true });

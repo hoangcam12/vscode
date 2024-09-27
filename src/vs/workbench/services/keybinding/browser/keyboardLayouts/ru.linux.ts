@@ -3,11 +3,11 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { KeyboardLayoutContribution } from 'vs/workbench/services/keybinding/browser/keyboardLayouts/_.contribution';
+import { KeyboardLayoutContribution } from './_.contribution.js';
 
 
 KeyboardLayoutContribution.INSTANCE.registerKeyboardLayout({
-	layout: { model: 'pc104', layout: 'ru', variant: ',', options: '', rules: 'base' },
+	layout: { model: 'pc104', group: 0, layout: 'ru', variant: ',', options: '', rules: 'base' },
 	secondaryLayouts: [],
 	mapping: {
 		Sleep: [],

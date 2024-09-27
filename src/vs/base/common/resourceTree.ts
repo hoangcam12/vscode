@@ -3,11 +3,11 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { memoize } from 'vs/base/common/decorators';
-import * as paths from 'vs/base/common/path';
-import { IExtUri, extUri as defaultExtUri } from 'vs/base/common/resources';
-import { URI } from 'vs/base/common/uri';
-import { PathIterator } from 'vs/base/common/map';
+import { memoize } from './decorators.js';
+import { PathIterator } from './ternarySearchTree.js';
+import * as paths from './path.js';
+import { extUri as defaultExtUri, IExtUri } from './resources.js';
+import { URI } from './uri.js';
 
 export interface IResourceNode<T, C = void> {
 	readonly uri: URI;

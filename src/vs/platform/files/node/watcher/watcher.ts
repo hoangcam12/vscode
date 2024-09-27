@@ -3,107 +3,84 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { URI as uri } from 'vs/base/common/uri';
-import { FileChangeType, isParent, IFileChange } from 'vs/platform/files/common/files';
-import { isLinux } from 'vs/base/common/platform';
+import { Disposable } from '../../../../base/common/lifecycle.js';
+import { ILogMessage, isRecursiveWatchRequest, IUniversalWatcher, IUniversalWatchRequest } from '../../common/watcher.js';
+import { Emitter, Event } from '../../../../base/common/event.js';
+import { ParcelWatcher } from './parcel/parcelWatcher.js';
+import { NodeJSWatcher } from './nodejs/nodejsWatcher.js';
+import { Promises } from '../../../../base/common/async.js';
+import { computeStats } from './watcherStats.js';
 
-export interface IDiskFileChange {
-	type: FileChangeType;
-	path: string;
-}
+export class UniversalWatcher extends Disposable implements IUniversalWatcher {
 
-export interface ILogMessage {
-	type: 'trace' | 'warn' | 'error' | 'info' | 'debug';
-	message: string;
-}
+	private readonly recursiveWatcher = this._register(new ParcelWatcher());
+	private readonly nonRecursiveWatcher = this._register(new NodeJSWatcher(this.recursiveWatcher));
 
-export function toFileChanges(changes: IDiskFileChange[]): IFileChange[] {
-	return changes.map(change => ({
-		type: change.type,
-		resource: uri.file(change.path)
-	}));
-}
+	readonly onDidChangeFile = Event.any(this.recursiveWatcher.onDidChangeFile, this.nonRecursiveWatcher.onDidChangeFile);
+	readonly onDidError = Event.any(this.recursiveWatcher.onDidError, this.nonRecursiveWatcher.onDidError);
 
-export function normalizeFileChanges(changes: IDiskFileChange[]): IDiskFileChange[] {
+	private readonly _onDidLogMessage = this._register(new Emitter<ILogMessage>());
+	readonly onDidLogMessage = Event.any(this._onDidLogMessage.event, this.recursiveWatcher.onDidLogMessage, this.nonRecursiveWatcher.onDidLogMessage);
 
-	// Build deltas
-	const normalizer = new EventNormalizer();
-	for (const event of changes) {
-		normalizer.processEvent(event);
+	private requests: IUniversalWatchRequest[] = [];
+	private failedRecursiveRequests = 0;
+
+	constructor() {
+		super();
+
+		this._register(this.recursiveWatcher.onDidError(e => {
+			if (e.request) {
+				this.failedRecursiveRequests++;
+			}
+		}));
 	}
 
-	return normalizer.normalize();
-}
+	async watch(requests: IUniversalWatchRequest[]): Promise<void> {
+		this.requests = requests;
+		this.failedRecursiveRequests = 0;
 
-class EventNormalizer {
-	private normalized: IDiskFileChange[] = [];
-	private mapPathToChange: Map<string, IDiskFileChange> = new Map();
+		// Watch recursively first to give recursive watchers a chance
+		// to step in for non-recursive watch requests, thus reducing
+		// watcher duplication.
 
-	processEvent(event: IDiskFileChange): void {
-		const existingEvent = this.mapPathToChange.get(event.path);
+		let error: Error | undefined;
+		try {
+			await this.recursiveWatcher.watch(requests.filter(request => isRecursiveWatchRequest(request)));
+		} catch (e) {
+			error = e;
+		}
 
-		// Event path already exists
-		if (existingEvent) {
-			const currentChangeType = existingEvent.type;
-			const newChangeType = event.type;
-
-			// ignore CREATE followed by DELETE in one go
-			if (currentChangeType === FileChangeType.ADDED && newChangeType === FileChangeType.DELETED) {
-				this.mapPathToChange.delete(event.path);
-				this.normalized.splice(this.normalized.indexOf(existingEvent), 1);
-			}
-
-			// flatten DELETE followed by CREATE into CHANGE
-			else if (currentChangeType === FileChangeType.DELETED && newChangeType === FileChangeType.ADDED) {
-				existingEvent.type = FileChangeType.UPDATED;
-			}
-
-			// Do nothing. Keep the created event
-			else if (currentChangeType === FileChangeType.ADDED && newChangeType === FileChangeType.UPDATED) { }
-
-			// Otherwise apply change type
-			else {
-				existingEvent.type = newChangeType;
+		try {
+			await this.nonRecursiveWatcher.watch(requests.filter(request => !isRecursiveWatchRequest(request)));
+		} catch (e) {
+			if (!error) {
+				error = e;
 			}
 		}
 
-		// Otherwise store new
-		else {
-			this.normalized.push(event);
-			this.mapPathToChange.set(event.path, event);
+		if (error) {
+			throw error;
 		}
 	}
 
-	normalize(): IDiskFileChange[] {
-		const addedChangeEvents: IDiskFileChange[] = [];
-		const deletedPaths: string[] = [];
+	async setVerboseLogging(enabled: boolean): Promise<void> {
 
-		// This algorithm will remove all DELETE events up to the root folder
-		// that got deleted if any. This ensures that we are not producing
-		// DELETE events for each file inside a folder that gets deleted.
-		//
-		// 1.) split ADD/CHANGE and DELETED events
-		// 2.) sort short deleted paths to the top
-		// 3.) for each DELETE, check if there is a deleted parent and ignore the event in that case
-		return this.normalized.filter(e => {
-			if (e.type !== FileChangeType.DELETED) {
-				addedChangeEvents.push(e);
+		// Log stats
+		if (enabled && this.requests.length > 0) {
+			this._onDidLogMessage.fire({ type: 'trace', message: computeStats(this.requests, this.failedRecursiveRequests, this.recursiveWatcher, this.nonRecursiveWatcher) });
+		}
 
-				return false; // remove ADD / CHANGE
-			}
+		// Forward to watchers
+		await Promises.settled([
+			this.recursiveWatcher.setVerboseLogging(enabled),
+			this.nonRecursiveWatcher.setVerboseLogging(enabled)
+		]);
+	}
 
-			return true; // keep DELETE
-		}).sort((e1, e2) => {
-			return e1.path.length - e2.path.length; // shortest path first
-		}).filter(e => {
-			if (deletedPaths.some(deletedPath => isParent(e.path, deletedPath, !isLinux /* ignorecase */))) {
-				return false; // DELETE is ignored if parent is deleted already
-			}
-
-			// otherwise mark as deleted
-			deletedPaths.push(e.path);
-
-			return true;
-		}).concat(addedChangeEvents);
+	async stop(): Promise<void> {
+		await Promises.settled([
+			this.recursiveWatcher.stop(),
+			this.nonRecursiveWatcher.stop()
+		]);
 	}
 }

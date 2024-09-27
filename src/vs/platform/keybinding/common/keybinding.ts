@@ -3,29 +3,20 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Event } from 'vs/base/common/event';
-import { IJSONSchema } from 'vs/base/common/jsonSchema';
-import { Keybinding, KeyCode, ResolvedKeybinding } from 'vs/base/common/keyCodes';
-import { IContextKeyService, IContextKeyServiceTarget } from 'vs/platform/contextkey/common/contextkey';
-import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
-import { IResolveResult } from 'vs/platform/keybinding/common/keybindingResolver';
-import { ResolvedKeybindingItem } from 'vs/platform/keybinding/common/resolvedKeybindingItem';
+import { Event } from '../../../base/common/event.js';
+import { IJSONSchema } from '../../../base/common/jsonSchema.js';
+import { KeyCode } from '../../../base/common/keyCodes.js';
+import { ResolvedKeybinding, Keybinding } from '../../../base/common/keybindings.js';
+import { IContextKeyService, IContextKeyServiceTarget } from '../../contextkey/common/contextkey.js';
+import { createDecorator } from '../../instantiation/common/instantiation.js';
+import { ResolutionResult } from './keybindingResolver.js';
+import { ResolvedKeybindingItem } from './resolvedKeybindingItem.js';
 
 export interface IUserFriendlyKeybinding {
 	key: string;
 	command: string;
 	args?: any;
 	when?: string;
-}
-
-export const enum KeybindingSource {
-	Default = 1,
-	User
-}
-
-export interface IKeybindingEvent {
-	source: KeybindingSource;
-	keybindings?: IUserFriendlyKeybinding[];
 }
 
 export interface IKeyboardEvent {
@@ -35,6 +26,7 @@ export interface IKeyboardEvent {
 	readonly shiftKey: boolean;
 	readonly altKey: boolean;
 	readonly metaKey: boolean;
+	readonly altGraphKey: boolean;
 	readonly keyCode: KeyCode;
 	readonly code: string;
 }
@@ -52,7 +44,7 @@ export interface IKeybindingService {
 
 	readonly inChordMode: boolean;
 
-	onDidUpdateKeybindings: Event<IKeybindingEvent>;
+	onDidUpdateKeybindings: Event<void>;
 
 	/**
 	 * Returns none, one or many (depending on keyboard layout)!
@@ -71,7 +63,15 @@ export interface IKeybindingService {
 	/**
 	 * Resolve and dispatch `keyboardEvent`, but do not invoke the command or change inner state.
 	 */
-	softDispatch(keyboardEvent: IKeyboardEvent, target: IContextKeyServiceTarget): IResolveResult | null;
+	softDispatch(keyboardEvent: IKeyboardEvent, target: IContextKeyServiceTarget): ResolutionResult;
+
+	/**
+	 * Enable hold mode for this command. This is only possible if the command is current being dispatched, meaning
+	 * we are after its keydown and before is keyup event.
+	 *
+	 * @returns A promise that resolves when hold stops, returns undefined if hold mode could not be enabled.
+	 */
+	enableKeybindingHoldMode(commandId: string): Promise<void> | undefined;
 
 	dispatchByUserSettingsLabel(userSettingsLabel: string, target: IContextKeyServiceTarget): void;
 
@@ -108,4 +108,3 @@ export interface IKeybindingService {
 	_dumpDebugInfo(): string;
 	_dumpDebugInfoJSON(): string;
 }
-

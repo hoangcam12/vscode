@@ -3,27 +3,17 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Emitter } from 'vs/base/common/event';
-import { Disposable } from 'vs/base/common/lifecycle';
-import { URI } from 'vs/base/common/uri';
-import * as nls from 'vs/nls';
-import { IExtensionDescription } from 'vs/platform/extensions/common/extensions';
-import { IStorageService, StorageScope, StorageTarget } from 'vs/platform/storage/common/storage';
-import { Memento } from 'vs/workbench/common/memento';
-import { CustomEditorDescriptor, CustomEditorInfo } from 'vs/workbench/contrib/customEditor/common/customEditor';
-import { customEditorsExtensionPoint, ICustomEditorsExtensionPoint } from 'vs/workbench/contrib/customEditor/common/extensionPoint';
-import { ContributedEditorPriority } from 'vs/workbench/services/editor/common/editorOverrideService';
-import { IExtensionPointUser } from 'vs/workbench/services/extensions/common/extensionsRegistry';
-
-export const defaultCustomEditor = new CustomEditorInfo({
-	id: 'default',
-	displayName: nls.localize('promptOpenWith.defaultEditor.displayName', "Text Editor"),
-	providerDisplayName: nls.localize('builtinProviderDisplayName', "Built-in"),
-	selector: [
-		{ filenamePattern: '*' }
-	],
-	priority: ContributedEditorPriority.default,
-});
+import { Emitter } from '../../../../base/common/event.js';
+import { Disposable } from '../../../../base/common/lifecycle.js';
+import { URI } from '../../../../base/common/uri.js';
+import * as nls from '../../../../nls.js';
+import { IExtensionDescription } from '../../../../platform/extensions/common/extensions.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
+import { Memento } from '../../../common/memento.js';
+import { CustomEditorDescriptor, CustomEditorInfo } from './customEditor.js';
+import { customEditorsExtensionPoint, ICustomEditorsExtensionPoint } from './extensionPoint.js';
+import { RegisteredEditorPriority } from '../../../services/editor/common/editorResolverService.js';
+import { IExtensionPointUser } from '../../../services/extensions/common/extensionsRegistry.js';
 
 export class ContributedCustomEditors extends Disposable {
 
@@ -38,7 +28,7 @@ export class ContributedCustomEditors extends Disposable {
 
 		this._memento = new Memento(ContributedCustomEditors.CUSTOM_EDITORS_STORAGE_ID, storageService);
 
-		const mementoObject = this._memento.getMemento(StorageScope.GLOBAL, StorageTarget.MACHINE);
+		const mementoObject = this._memento.getMemento(StorageScope.PROFILE, StorageTarget.MACHINE);
 		for (const info of (mementoObject[ContributedCustomEditors.CUSTOM_EDITORS_ENTRY_ID] || []) as CustomEditorDescriptor[]) {
 			this.add(new CustomEditorInfo(info));
 		}
@@ -66,7 +56,7 @@ export class ContributedCustomEditors extends Disposable {
 			}
 		}
 
-		const mementoObject = this._memento.getMemento(StorageScope.GLOBAL, StorageTarget.MACHINE);
+		const mementoObject = this._memento.getMemento(StorageScope.PROFILE, StorageTarget.MACHINE);
 		mementoObject[ContributedCustomEditors.CUSTOM_EDITORS_ENTRY_ID] = Array.from(this._editors.values());
 		this._memento.saveMemento();
 
@@ -78,9 +68,7 @@ export class ContributedCustomEditors extends Disposable {
 	}
 
 	public get(viewType: string): CustomEditorInfo | undefined {
-		return viewType === defaultCustomEditor.id
-			? defaultCustomEditor
-			: this._editors.get(viewType);
+		return this._editors.get(viewType);
 	}
 
 	public getContributedEditors(resource: URI): readonly CustomEditorInfo[] {
@@ -89,7 +77,7 @@ export class ContributedCustomEditors extends Disposable {
 	}
 
 	private add(info: CustomEditorInfo): void {
-		if (info.id === defaultCustomEditor.id || this._editors.has(info.id)) {
+		if (this._editors.has(info.id)) {
 			console.error(`Custom editor with id '${info.id}' already registered`);
 			return;
 		}
@@ -100,17 +88,17 @@ export class ContributedCustomEditors extends Disposable {
 function getPriorityFromContribution(
 	contribution: ICustomEditorsExtensionPoint,
 	extension: IExtensionDescription,
-): ContributedEditorPriority {
+): RegisteredEditorPriority {
 	switch (contribution.priority) {
-		case ContributedEditorPriority.default:
-		case ContributedEditorPriority.option:
+		case RegisteredEditorPriority.default:
+		case RegisteredEditorPriority.option:
 			return contribution.priority;
 
-		case ContributedEditorPriority.builtin:
+		case RegisteredEditorPriority.builtin:
 			// Builtin is only valid for builtin extensions
-			return extension.isBuiltin ? ContributedEditorPriority.builtin : ContributedEditorPriority.default;
+			return extension.isBuiltin ? RegisteredEditorPriority.builtin : RegisteredEditorPriority.default;
 
 		default:
-			return ContributedEditorPriority.default;
+			return RegisteredEditorPriority.default;
 	}
 }

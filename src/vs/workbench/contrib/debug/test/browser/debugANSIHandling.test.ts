@@ -3,45 +3,47 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
-import { generateUuid } from 'vs/base/common/uuid';
-import { appendStylizedStringToContainer, handleANSIOutput, calcANSI8bitColor } from 'vs/workbench/contrib/debug/browser/debugANSIHandling';
-import { TestInstantiationService } from 'vs/platform/instantiation/test/common/instantiationServiceMock';
-import { workbenchInstantiationService } from 'vs/workbench/test/browser/workbenchTestServices';
-import { LinkDetector } from 'vs/workbench/contrib/debug/browser/linkDetector';
-import { Color, RGBA } from 'vs/base/common/color';
-import { IThemeService } from 'vs/platform/theme/common/themeService';
-import { TestThemeService, TestColorTheme } from 'vs/platform/theme/test/common/testThemeService';
-import { ansiColorMap } from 'vs/workbench/contrib/terminal/common/terminalColorRegistry';
-import { DebugModel } from 'vs/workbench/contrib/debug/common/debugModel';
-import { DebugSession } from 'vs/workbench/contrib/debug/browser/debugSession';
-import { createMockDebugModel } from 'vs/workbench/contrib/debug/test/browser/mockDebug';
-import { createMockSession } from 'vs/workbench/contrib/debug/test/browser/callStack.test';
+import assert from 'assert';
+import { isHTMLSpanElement } from '../../../../../base/browser/dom.js';
+import { Color, RGBA } from '../../../../../base/common/color.js';
+import { DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { generateUuid } from '../../../../../base/common/uuid.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { TestInstantiationService } from '../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
+import { workbenchInstantiationService } from '../../../../test/browser/workbenchTestServices.js';
+import { registerColors } from '../../../terminal/common/terminalColorRegistry.js';
+import { appendStylizedStringToContainer, calcANSI8bitColor, handleANSIOutput } from '../../browser/debugANSIHandling.js';
+import { DebugSession } from '../../browser/debugSession.js';
+import { LinkDetector } from '../../browser/linkDetector.js';
+import { DebugModel } from '../../common/debugModel.js';
+import { createTestSession } from './callStack.test.js';
+import { createMockDebugModel } from './mockDebugModel.js';
 
 suite('Debug - ANSI Handling', () => {
 
+	let disposables: DisposableStore;
 	let model: DebugModel;
 	let session: DebugSession;
 	let linkDetector: LinkDetector;
-	let themeService: IThemeService;
 
 	/**
 	 * Instantiate services for use by the functions being tested.
 	 */
 	setup(() => {
-		model = createMockDebugModel();
-		session = createMockSession(model);
+		disposables = new DisposableStore();
+		model = createMockDebugModel(disposables);
+		session = createTestSession(model);
 
-		const instantiationService: TestInstantiationService = <TestInstantiationService>workbenchInstantiationService();
+		const instantiationService: TestInstantiationService = <TestInstantiationService>workbenchInstantiationService(undefined, disposables);
 		linkDetector = instantiationService.createInstance(LinkDetector);
-
-		const colors: { [id: string]: string; } = {};
-		for (let color in ansiColorMap) {
-			colors[color] = <any>ansiColorMap[color].defaults.dark;
-		}
-		const testTheme = new TestColorTheme(colors);
-		themeService = new TestThemeService(testTheme);
+		registerColors();
 	});
+
+	teardown(() => {
+		disposables.dispose();
+	});
+
+	ensureNoDisposablesAreLeakedInTestSuite();
 
 	test('appendStylizedStringToContainer', () => {
 		const root: HTMLSpanElement = document.createElement('span');
@@ -55,7 +57,7 @@ suite('Debug - ANSI Handling', () => {
 		assert.strictEqual(2, root.children.length);
 
 		child = root.firstChild!;
-		if (child instanceof HTMLSpanElement) {
+		if (isHTMLSpanElement(child)) {
 			assert.strictEqual('content1', child.textContent);
 			assert(child.classList.contains('class1'));
 			assert(child.classList.contains('class2'));
@@ -64,7 +66,7 @@ suite('Debug - ANSI Handling', () => {
 		}
 
 		child = root.lastChild!;
-		if (child instanceof HTMLSpanElement) {
+		if (isHTMLSpanElement(child)) {
 			assert.strictEqual('content2', child.textContent);
 			assert(child.classList.contains('class2'));
 			assert(child.classList.contains('class3'));
@@ -80,10 +82,10 @@ suite('Debug - ANSI Handling', () => {
 	 * @returns An {@link HTMLSpanElement} that contains the stylized text.
 	 */
 	function getSequenceOutput(sequence: string): HTMLSpanElement {
-		const root: HTMLSpanElement = handleANSIOutput(sequence, linkDetector, themeService, session.root);
+		const root: HTMLSpanElement = handleANSIOutput(sequence, linkDetector, session.root);
 		assert.strictEqual(1, root.children.length);
 		const child: Node = root.lastChild!;
-		if (child instanceof HTMLSpanElement) {
+		if (isHTMLSpanElement(child)) {
 			return child;
 		} else {
 			assert.fail('Unexpected assertion error');
@@ -340,7 +342,7 @@ suite('Debug - ANSI Handling', () => {
 		for (let r = 0; r <= 255; r += 64) {
 			for (let g = 0; g <= 255; g += 64) {
 				for (let b = 0; b <= 255; b += 64) {
-					let color = new RGBA(r, g, b);
+					const color = new RGBA(r, g, b);
 					// Foreground codes should add class and inline style
 					assertSingleSequenceElement(`\x1b[38;2;${r};${g};${b}m`, (child) => {
 						assert(child.classList.contains('code-foreground-colored'), 'DOM should have "code-foreground-colored" class for advanced ANSI colors.');
@@ -393,11 +395,11 @@ suite('Debug - ANSI Handling', () => {
 		if (elementsExpected === undefined) {
 			elementsExpected = assertions.length;
 		}
-		const root: HTMLSpanElement = handleANSIOutput(sequence, linkDetector, themeService, session.root);
+		const root: HTMLSpanElement = handleANSIOutput(sequence, linkDetector, session.root);
 		assert.strictEqual(elementsExpected, root.children.length);
 		for (let i = 0; i < elementsExpected; i++) {
 			const child: Node = root.children[i];
-			if (child instanceof HTMLSpanElement) {
+			if (isHTMLSpanElement(child)) {
 				assertions[i](child);
 			} else {
 				assert.fail('Unexpected assertion error');
@@ -1026,7 +1028,7 @@ suite('Debug - ANSI Handling', () => {
 		for (let red = 0; red <= 5; red++) {
 			for (let green = 0; green <= 5; green++) {
 				for (let blue = 0; blue <= 5; blue++) {
-					let colorOut: any = calcANSI8bitColor(16 + red * 36 + green * 6 + blue);
+					const colorOut: any = calcANSI8bitColor(16 + red * 36 + green * 6 + blue);
 					assert(colorOut.r === Math.round(red * (255 / 5)), 'Incorrect red value encountered for color');
 					assert(colorOut.g === Math.round(green * (255 / 5)), 'Incorrect green value encountered for color');
 					assert(colorOut.b === Math.round(blue * (255 / 5)), 'Incorrect balue value encountered for color');
@@ -1036,7 +1038,7 @@ suite('Debug - ANSI Handling', () => {
 
 		// All grays
 		for (let i = 232; i <= 255; i++) {
-			let grayOut: any = calcANSI8bitColor(i);
+			const grayOut: any = calcANSI8bitColor(i);
 			assert(grayOut.r === grayOut.g);
 			assert(grayOut.r === grayOut.b);
 			assert(grayOut.r === Math.round((i - 232) / 23 * 255));

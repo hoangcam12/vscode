@@ -3,19 +3,11 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import assert from 'assert';
 import {
-	compareFileNames,
-	compareFileExtensions,
-	compareFileNamesDefault,
-	compareFileExtensionsDefault,
-	compareFileNamesUpper,
-	compareFileExtensionsUpper,
-	compareFileNamesLower,
-	compareFileExtensionsLower,
-	compareFileNamesUnicode,
-	compareFileExtensionsUnicode,
-} from 'vs/base/common/comparers';
-import * as assert from 'assert';
+	compareFileExtensions, compareFileExtensionsDefault, compareFileExtensionsLower, compareFileExtensionsUnicode, compareFileExtensionsUpper, compareFileNames, compareFileNamesDefault, compareFileNamesLower, compareFileNamesUnicode, compareFileNamesUpper
+} from '../../common/comparers.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../common/utils.js';
 
 const compareLocale = (a: string, b: string) => a.localeCompare(b);
 const compareLocaleNumeric = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
@@ -703,7 +695,7 @@ suite('Comparers', () => {
 		assert(compareFileExtensionsUnicode('txt.abc01', 'txt.abc1') < 0, 'extensions with equivalent numbers sort in unicode order');
 		assert(compareFileExtensionsUnicode('a.ext1', 'b.Ext1') < 0, 'if extensions with numbers are equal except for case, unicode full filenames should be compared');
 		assert(compareFileExtensionsUnicode('a.ext1', 'a.Ext1') > 0, 'if extensions with numbers are equal except for case, unicode full filenames should be compared');
-
 	});
 
+	ensureNoDisposablesAreLeakedInTestSuite();
 });

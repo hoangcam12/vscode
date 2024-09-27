@@ -3,11 +3,11 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { KeyboardLayoutContribution } from 'vs/workbench/services/keybinding/browser/keyboardLayouts/_.contribution';
+import { KeyboardLayoutContribution } from './_.contribution.js';
 
 
 KeyboardLayoutContribution.INSTANCE.registerKeyboardLayout({
-	layout: { model: 'pc105', layout: 'es', variant: '', options: '', rules: 'evdev' },
+	layout: { model: 'pc105', group: 0, layout: 'es', variant: '', options: '', rules: 'evdev' },
 	secondaryLayouts: [],
 	mapping: {
 		Sleep: [],

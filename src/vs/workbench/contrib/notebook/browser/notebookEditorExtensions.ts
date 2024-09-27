@@ -3,8 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { BrandedService } from 'vs/platform/instantiation/common/instantiation';
-import { INotebookEditor, INotebookEditorContribution, INotebookEditorContributionCtor, INotebookEditorContributionDescription } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
+import { BrandedService } from '../../../../platform/instantiation/common/instantiation.js';
+import { INotebookEditor, INotebookEditorContribution, INotebookEditorContributionCtor, INotebookEditorContributionDescription } from './notebookBrowser.js';
 
 
 class EditorContributionRegistry {
@@ -32,5 +32,9 @@ export namespace NotebookEditorExtensionsRegistry {
 
 	export function getEditorContributions(): INotebookEditorContributionDescription[] {
 		return EditorContributionRegistry.INSTANCE.getEditorContributions();
+	}
+
+	export function getSomeEditorContributions(ids: string[]): INotebookEditorContributionDescription[] {
+		return EditorContributionRegistry.INSTANCE.getEditorContributions().filter(c => ids.indexOf(c.id) >= 0);
 	}
 }

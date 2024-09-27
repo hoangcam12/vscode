@@ -42,13 +42,12 @@ suite('git smoke test', function () {
 	suiteSetup(async function () {
 		fs.writeFileSync(file('app.js'), 'hello', 'utf8');
 		fs.writeFileSync(file('index.pug'), 'hello', 'utf8');
-		cp.execSync('git init', { cwd });
+		cp.execSync('git init -b main', { cwd });
 		cp.execSync('git config user.name testuser', { cwd });
-		cp.execSync('git config user.email monacotools@microsoft.com', { cwd });
+		cp.execSync('git config user.email monacotools@example.com', { cwd });
 		cp.execSync('git config commit.gpgsign false', { cwd });
 		cp.execSync('git add .', { cwd });
 		cp.execSync('git commit -m "initial commit"', { cwd });
-		cp.execSync('git branch -m main', { cwd });
 
 		// make sure git is activated
 		const ext = extensions.getExtension<GitExtension>('vscode.git');
@@ -56,7 +55,9 @@ suite('git smoke test', function () {
 		git = ext!.exports.getAPI(1);
 
 		if (git.repositories.length === 0) {
-			await eventToPromise(git.onDidOpenRepository);
+			const onDidOpenRepository = eventToPromise(git.onDidOpenRepository);
+			await commands.executeCommand('git.openRepository', cwd);
+			await onDidOpenRepository;
 		}
 
 		assert.strictEqual(git.repositories.length, 1);
@@ -128,29 +129,26 @@ suite('git smoke test', function () {
 	});
 
 	test('rename/delete conflict', async function () {
-		cp.execSync('git branch test', { cwd });
-		cp.execSync('git checkout test', { cwd });
+		await commands.executeCommand('workbench.view.scm');
 
+		await repository.createBranch('test', true);
+
+		// Delete file (test branch)
 		fs.unlinkSync(file('app.js'));
-		cp.execSync('git add .', { cwd });
+		await repository.commit('commit on test', { all: true });
 
-		await repository.commit('commit on test');
-		cp.execSync('git checkout main', { cwd });
+		await repository.checkout('main');
 
+		// Rename file (main branch)
 		fs.renameSync(file('app.js'), file('rename.js'));
-		cp.execSync('git add .', { cwd });
-		await repository.commit('commit on main');
+		await repository.commit('commit on main', { all: true });
 
 		try {
-			cp.execSync('git merge test', { cwd });
+			await repository.merge('test');
 		} catch (e) { }
 
-		setTimeout(() => {
-			commands.executeCommand('workbench.scm.focus');
-		}, 2e3);
-
-		await new Promise(resolve => {
-			setTimeout(resolve, 5e3);
-		});
+		assert.strictEqual(repository.state.mergeChanges.length, 1);
+		assert.strictEqual(repository.state.workingTreeChanges.length, 0);
+		assert.strictEqual(repository.state.indexChanges.length, 0);
 	});
 });

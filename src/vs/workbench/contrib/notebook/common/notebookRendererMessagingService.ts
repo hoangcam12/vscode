@@ -3,8 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Event } from 'vs/base/common/event';
-import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
+import { Event } from '../../../../base/common/event.js';
+import { IDisposable } from '../../../../base/common/lifecycle.js';
+import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 
 export const INotebookRendererMessagingService = createDecorator<INotebookRendererMessagingService>('INotebookRendererMessagingService');
 
@@ -28,14 +29,15 @@ export interface INotebookRendererMessagingService {
 	/**
 	 * Called when the main thread gets a message for a renderer.
 	 */
-	fireDidReceiveMessage(editorId: string, rendererId: string, message: unknown): void;
+	receiveMessage(editorId: string | undefined, rendererId: string, message: unknown): Promise<boolean>;
 }
 
-export interface IScopedRendererMessaging {
+export interface IScopedRendererMessaging extends IDisposable {
 	/**
-	 * Event that fires when a message is received.
+	 * Method called when a message is received. Should return a boolean
+	 * indicating whether a renderer received it.
 	 */
-	onDidReceiveMessage: Event<{ rendererId: string; message: unknown }>;
+	receiveMessageHandler?: (rendererId: string, message: unknown) => Promise<boolean>;
 
 	/**
 	 * Sends a message to an extension from a renderer.

@@ -4,39 +4,99 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { strictEqual } from 'assert';
-import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { TerminalConfigHelper } from 'vs/workbench/contrib/terminal/browser/terminalConfigHelper';
-import { TerminalProcessManager } from 'vs/workbench/contrib/terminal/browser/terminalProcessManager';
-import { TestConfigurationService } from 'vs/platform/configuration/test/common/testConfigurationService';
-import { ITestInstantiationService, TestProductService, TestTerminalProfileResolverService, workbenchInstantiationService } from 'vs/workbench/test/browser/workbenchTestServices';
-import { IProductService } from 'vs/platform/product/common/productService';
-import { IEnvironmentVariableService } from 'vs/workbench/contrib/terminal/common/environmentVariable';
-import { EnvironmentVariableService } from 'vs/workbench/contrib/terminal/common/environmentVariableService';
-import { Schemas } from 'vs/base/common/network';
-import { URI } from 'vs/base/common/uri';
-import { ITerminalProfileResolverService } from 'vs/workbench/contrib/terminal/common/terminal';
+import { Event } from '../../../../../base/common/event.js';
+import { Schemas } from '../../../../../base/common/network.js';
+import { URI } from '../../../../../base/common/uri.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+import { TestConfigurationService } from '../../../../../platform/configuration/test/common/testConfigurationService.js';
+import { ITerminalChildProcess } from '../../../../../platform/terminal/common/terminal.js';
+import { ITerminalInstanceService } from '../../browser/terminal.js';
+import { TerminalProcessManager } from '../../browser/terminalProcessManager.js';
+import { workbenchInstantiationService } from '../../../../test/browser/workbenchTestServices.js';
+
+class TestTerminalChildProcess implements ITerminalChildProcess {
+	id: number = 0;
+	get capabilities() { return []; }
+	constructor(
+		readonly shouldPersist: boolean
+	) {
+	}
+	updateProperty(property: any, value: any): Promise<void> {
+		throw new Error('Method not implemented.');
+	}
+
+	onProcessOverrideDimensions?: Event<any> | undefined;
+	onProcessResolvedShellLaunchConfig?: Event<any> | undefined;
+	onDidChangeHasChildProcesses?: Event<any> | undefined;
+
+	onDidChangeProperty = Event.None;
+	onProcessData = Event.None;
+	onProcessExit = Event.None;
+	onProcessReady = Event.None;
+	onProcessTitleChanged = Event.None;
+	onProcessShellTypeChanged = Event.None;
+	async start(): Promise<undefined> { return undefined; }
+	shutdown(immediate: boolean): void { }
+	input(data: string): void { }
+	resize(cols: number, rows: number): void { }
+	clearBuffer(): void { }
+	acknowledgeDataEvent(charCount: number): void { }
+	async setUnicodeVersion(version: '6' | '11'): Promise<void> { }
+	async getInitialCwd(): Promise<string> { return ''; }
+	async getCwd(): Promise<string> { return ''; }
+	async processBinary(data: string): Promise<void> { }
+	refreshProperty(property: any): Promise<any> { return Promise.resolve(''); }
+}
+
+class TestTerminalInstanceService implements Partial<ITerminalInstanceService> {
+	getBackend() {
+		return {
+			onPtyHostExit: Event.None,
+			onPtyHostUnresponsive: Event.None,
+			onPtyHostResponsive: Event.None,
+			onPtyHostRestart: Event.None,
+			onDidMoveWindowInstance: Event.None,
+			onDidRequestDetach: Event.None,
+			createProcess: (
+				shellLaunchConfig: any,
+				cwd: string,
+				cols: number,
+				rows: number,
+				unicodeVersion: '6' | '11',
+				env: any,
+				windowsEnableConpty: boolean,
+				shouldPersist: boolean
+			) => new TestTerminalChildProcess(shouldPersist),
+			getLatency: () => Promise.resolve([])
+		} as any;
+	}
+}
 
 suite('Workbench - TerminalProcessManager', () => {
-	let instantiationService: ITestInstantiationService;
 	let manager: TerminalProcessManager;
 
+	const store = ensureNoDisposablesAreLeakedInTestSuite();
+
 	setup(async () => {
-		instantiationService = workbenchInstantiationService();
-		const configurationService = new TestConfigurationService();
+		const instantiationService = workbenchInstantiationService(undefined, store);
+		const configurationService = instantiationService.get(IConfigurationService) as TestConfigurationService;
 		await configurationService.setUserConfiguration('editor', { fontFamily: 'foo' });
 		await configurationService.setUserConfiguration('terminal', {
 			integrated: {
 				fontFamily: 'bar',
-				enablePersistentSessions: true
+				enablePersistentSessions: true,
+				shellIntegration: {
+					enabled: false
+				}
 			}
 		});
-		instantiationService.stub(IConfigurationService, configurationService);
-		instantiationService.stub(IProductService, TestProductService);
-		instantiationService.stub(IEnvironmentVariableService, instantiationService.createInstance(EnvironmentVariableService));
-		instantiationService.stub(ITerminalProfileResolverService, TestTerminalProfileResolverService);
+		configurationService.onDidChangeConfigurationEmitter.fire({
+			affectsConfiguration: () => true,
+		} as any);
+		instantiationService.stub(ITerminalInstanceService, new TestTerminalInstanceService());
 
-		const configHelper = instantiationService.createInstance(TerminalConfigHelper);
-		manager = instantiationService.createInstance(TerminalProcessManager, 1, configHelper);
+		manager = store.add(instantiationService.createInstance(TerminalProcessManager, 1, undefined, undefined, undefined));
 	});
 
 	suite('process persistence', () => {

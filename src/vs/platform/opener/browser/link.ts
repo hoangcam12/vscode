@@ -3,30 +3,39 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Event } from 'vs/base/common/event';
-import { IOpenerService } from 'vs/platform/opener/common/opener';
-import { $, EventHelper, EventLike } from 'vs/base/browser/dom';
-import { DomEmitter } from 'vs/base/browser/event';
-import { StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
-import { KeyCode } from 'vs/base/common/keyCodes';
-import { Disposable } from 'vs/base/common/lifecycle';
-import { registerThemingParticipant } from 'vs/platform/theme/common/themeService';
-import { textLinkActiveForeground, textLinkForeground } from 'vs/platform/theme/common/colorRegistry';
+import { $, append, EventHelper, EventLike, clearNode } from '../../../base/browser/dom.js';
+import { DomEmitter } from '../../../base/browser/event.js';
+import { StandardKeyboardEvent } from '../../../base/browser/keyboardEvent.js';
+import { EventType as TouchEventType, Gesture } from '../../../base/browser/touch.js';
+import { Event } from '../../../base/common/event.js';
+import { KeyCode } from '../../../base/common/keyCodes.js';
+import { Disposable } from '../../../base/common/lifecycle.js';
+import { IOpenerService } from '../common/opener.js';
+import './link.css';
+import { getDefaultHoverDelegate } from '../../../base/browser/ui/hover/hoverDelegateFactory.js';
+import { IHoverDelegate } from '../../../base/browser/ui/hover/hoverDelegate.js';
+import type { IManagedHover } from '../../../base/browser/ui/hover/hover.js';
+import { IHoverService } from '../../hover/browser/hover.js';
 
 export interface ILinkDescriptor {
-	readonly label: string;
+	readonly label: string | HTMLElement;
 	readonly href: string;
 	readonly title?: string;
+	readonly tabIndex?: number;
 }
 
 export interface ILinkOptions {
 	readonly opener?: (href: string) => void;
+	readonly hoverDelegate?: IHoverDelegate;
 	readonly textLinkForeground?: string;
 }
 
 export class Link extends Disposable {
 
-	readonly el: HTMLAnchorElement;
+	private el: HTMLAnchorElement;
+	private hover?: IManagedHover;
+	private hoverDelegate: IHoverDelegate;
+
 	private _enabled: boolean = true;
 
 	get enabled(): boolean {
@@ -53,26 +62,53 @@ export class Link extends Disposable {
 		this._enabled = enabled;
 	}
 
+	set link(link: ILinkDescriptor) {
+		if (typeof link.label === 'string') {
+			this.el.textContent = link.label;
+		} else {
+			clearNode(this.el);
+			this.el.appendChild(link.label);
+		}
+
+		this.el.href = link.href;
+
+		if (typeof link.tabIndex !== 'undefined') {
+			this.el.tabIndex = link.tabIndex;
+		}
+
+		this.setTooltip(link.title);
+
+		this._link = link;
+	}
+
 	constructor(
-		link: ILinkDescriptor,
-		options: ILinkOptions | undefined = undefined,
+		container: HTMLElement,
+		private _link: ILinkDescriptor,
+		options: ILinkOptions = {},
+		@IHoverService private readonly _hoverService: IHoverService,
 		@IOpenerService openerService: IOpenerService
 	) {
 		super();
 
-		this.el = $<HTMLAnchorElement>('a.monaco-link', {
-			tabIndex: 0,
-			href: link.href,
-			title: link.title
-		}, link.label);
+		this.el = append(container, $('a.monaco-link', {
+			tabIndex: _link.tabIndex ?? 0,
+			href: _link.href,
+		}, _link.label));
+
+		this.hoverDelegate = options.hoverDelegate ?? getDefaultHoverDelegate('mouse');
+		this.setTooltip(_link.title);
+
+		this.el.setAttribute('role', 'button');
 
 		const onClickEmitter = this._register(new DomEmitter(this.el, 'click'));
 		const onKeyPress = this._register(new DomEmitter(this.el, 'keypress'));
-		const onEnterPress = Event.chain(onKeyPress.event)
-			.map(e => new StandardKeyboardEvent(e))
-			.filter(e => e.keyCode === KeyCode.Enter)
-			.event;
-		const onOpen = Event.any<EventLike>(onClickEmitter.event, onEnterPress);
+		const onEnterPress = Event.chain(onKeyPress.event, $ =>
+			$.map(e => new StandardKeyboardEvent(e))
+				.filter(e => e.keyCode === KeyCode.Enter)
+		);
+		const onTap = this._register(new DomEmitter(this.el, TouchEventType.Tap)).event;
+		this._register(Gesture.addTarget(this.el));
+		const onOpen = Event.any<EventLike>(onClickEmitter.event, onEnterPress, onTap);
 
 		this._register(onOpen(e => {
 			if (!this.enabled) {
@@ -82,24 +118,22 @@ export class Link extends Disposable {
 			EventHelper.stop(e, true);
 
 			if (options?.opener) {
-				options.opener(link.href);
+				options.opener(this._link.href);
 			} else {
-				openerService.open(link.href, { allowCommands: true });
+				openerService.open(this._link.href, { allowCommands: true });
 			}
 		}));
 
 		this.enabled = true;
 	}
+
+	private setTooltip(title: string | undefined): void {
+		if (this.hoverDelegate.showNativeHover) {
+			this.el.title = title ?? '';
+		} else if (!this.hover && title) {
+			this.hover = this._register(this._hoverService.setupManagedHover(this.hoverDelegate, this.el, title));
+		} else if (this.hover) {
+			this.hover.update(title);
+		}
+	}
 }
-
-registerThemingParticipant((theme, collector) => {
-	const textLinkForegroundColor = theme.getColor(textLinkForeground);
-	if (textLinkForegroundColor) {
-		collector.addRule(`.monaco-link { color: ${textLinkForegroundColor}; }`);
-	}
-
-	const textLinkActiveForegroundColor = theme.getColor(textLinkActiveForeground);
-	if (textLinkActiveForegroundColor) {
-		collector.addRule(`.monaco-link:hover { color: ${textLinkActiveForegroundColor}; }`);
-	}
-});

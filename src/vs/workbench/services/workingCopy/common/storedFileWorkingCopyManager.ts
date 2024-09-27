@@ -3,31 +3,34 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { DisposableStore, dispose, IDisposable } from 'vs/base/common/lifecycle';
-import { Event, Emitter } from 'vs/base/common/event';
-import { StoredFileWorkingCopy, StoredFileWorkingCopyState, IStoredFileWorkingCopy, IStoredFileWorkingCopyModel, IStoredFileWorkingCopyModelFactory, IStoredFileWorkingCopyResolveOptions } from 'vs/workbench/services/workingCopy/common/storedFileWorkingCopy';
-import { SaveReason } from 'vs/workbench/common/editor';
-import { ResourceMap } from 'vs/base/common/map';
-import { Promises, ResourceQueue } from 'vs/base/common/async';
-import { FileChangesEvent, FileChangeType, FileOperation, IFileService, IFileSystemProviderCapabilitiesChangeEvent, IFileSystemProviderRegistrationEvent } from 'vs/platform/files/common/files';
-import { ILifecycleService } from 'vs/workbench/services/lifecycle/common/lifecycle';
-import { URI } from 'vs/base/common/uri';
-import { VSBufferReadableStream } from 'vs/base/common/buffer';
-import { ILabelService } from 'vs/platform/label/common/label';
-import { ILogService } from 'vs/platform/log/common/log';
-import { joinPath } from 'vs/base/common/resources';
-import { IWorkingCopyFileService, WorkingCopyFileEvent } from 'vs/workbench/services/workingCopy/common/workingCopyFileService';
-import { IUriIdentityService } from 'vs/workbench/services/uriIdentity/common/uriIdentity';
-import { CancellationToken } from 'vs/base/common/cancellation';
-import { IWorkingCopyBackupService } from 'vs/workbench/services/workingCopy/common/workingCopyBackup';
-import { BaseFileWorkingCopyManager, IBaseFileWorkingCopyManager } from 'vs/workbench/services/workingCopy/common/abstractFileWorkingCopyManager';
-import { INotificationService } from 'vs/platform/notification/common/notification';
-import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
-import { IElevatedFileService } from 'vs/workbench/services/files/common/elevatedFileService';
-import { IFilesConfigurationService } from 'vs/workbench/services/filesConfiguration/common/filesConfigurationService';
-import { ITextFileService } from 'vs/workbench/services/textfile/common/textfiles';
-import { IWorkingCopyEditorService } from 'vs/workbench/services/workingCopy/common/workingCopyEditorService';
-import { IWorkingCopyService } from 'vs/workbench/services/workingCopy/common/workingCopyService';
+import { localize } from '../../../../nls.js';
+import { DisposableStore, dispose, IDisposable } from '../../../../base/common/lifecycle.js';
+import { Event, Emitter } from '../../../../base/common/event.js';
+import { StoredFileWorkingCopy, StoredFileWorkingCopyState, IStoredFileWorkingCopy, IStoredFileWorkingCopyModel, IStoredFileWorkingCopyModelFactory, IStoredFileWorkingCopyResolveOptions, IStoredFileWorkingCopySaveEvent as IBaseStoredFileWorkingCopySaveEvent } from './storedFileWorkingCopy.js';
+import { ResourceMap } from '../../../../base/common/map.js';
+import { Promises, ResourceQueue } from '../../../../base/common/async.js';
+import { FileChangesEvent, FileChangeType, FileOperation, IFileService, IFileSystemProviderCapabilitiesChangeEvent, IFileSystemProviderRegistrationEvent } from '../../../../platform/files/common/files.js';
+import { ILifecycleService } from '../../lifecycle/common/lifecycle.js';
+import { URI } from '../../../../base/common/uri.js';
+import { VSBufferReadableStream } from '../../../../base/common/buffer.js';
+import { ILabelService } from '../../../../platform/label/common/label.js';
+import { ILogService } from '../../../../platform/log/common/log.js';
+import { joinPath } from '../../../../base/common/resources.js';
+import { IWorkingCopyFileService, WorkingCopyFileEvent } from './workingCopyFileService.js';
+import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uriIdentity.js';
+import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { IWorkingCopyBackupService } from './workingCopyBackup.js';
+import { BaseFileWorkingCopyManager, IBaseFileWorkingCopyManager } from './abstractFileWorkingCopyManager.js';
+import { INotificationService } from '../../../../platform/notification/common/notification.js';
+import { IEditorService } from '../../editor/common/editorService.js';
+import { IElevatedFileService } from '../../files/common/elevatedFileService.js';
+import { IFilesConfigurationService } from '../../filesConfiguration/common/filesConfigurationService.js';
+import { IWorkingCopyEditorService } from './workingCopyEditorService.js';
+import { IWorkingCopyService } from './workingCopyService.js';
+import { isWeb } from '../../../../base/common/platform.js';
+import { onUnexpectedError } from '../../../../base/common/errors.js';
+import { SnapshotContext } from './fileWorkingCopy.js';
+import { IProgressService } from '../../../../platform/progress/common/progress.js';
 
 /**
  * The only one that should be dealing with `IStoredFileWorkingCopy` and handle all
@@ -47,6 +50,16 @@ export interface IStoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyM
 	readonly onDidChangeDirty: Event<IStoredFileWorkingCopy<M>>;
 
 	/**
+	 * An event for when a stored file working copy changed it's readonly state.
+	 */
+	readonly onDidChangeReadonly: Event<IStoredFileWorkingCopy<M>>;
+
+	/**
+	 * An event for when a stored file working copy changed it's orphaned state.
+	 */
+	readonly onDidChangeOrphaned: Event<IStoredFileWorkingCopy<M>>;
+
+	/**
 	 * An event for when a stored file working copy failed to save.
 	 */
 	readonly onDidSaveError: Event<IStoredFileWorkingCopy<M>>;
@@ -60,6 +73,11 @@ export interface IStoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyM
 	 * An event for when a stored file working copy was reverted.
 	 */
 	readonly onDidRevert: Event<IStoredFileWorkingCopy<M>>;
+
+	/**
+	 * An event for when a stored file working copy is removed from the manager.
+	 */
+	readonly onDidRemove: Event<URI>;
 
 	/**
 	 * Allows to resolve a stored file working copy. If the manager already knows
@@ -89,31 +107,33 @@ export interface IStoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyM
 	canDispose(workingCopy: IStoredFileWorkingCopy<M>): true | Promise<true>;
 }
 
-export interface IStoredFileWorkingCopySaveEvent<M extends IStoredFileWorkingCopyModel> {
+export interface IStoredFileWorkingCopySaveEvent<M extends IStoredFileWorkingCopyModel> extends IBaseStoredFileWorkingCopySaveEvent {
 
 	/**
 	 * The stored file working copy that was successfully saved.
 	 */
-	workingCopy: IStoredFileWorkingCopy<M>;
-
-	/**
-	 * The reason why the stored file working copy was saved.
-	 */
-	reason: SaveReason;
+	readonly workingCopy: IStoredFileWorkingCopy<M>;
 }
 
 export interface IStoredFileWorkingCopyManagerResolveOptions extends IStoredFileWorkingCopyResolveOptions {
 
 	/**
 	 * If the stored file working copy was already resolved before,
-	 * allows to trigger a reload of it to fetch the latest contents:
-	 * - async: resolve() will return immediately and trigger
-	 *          a reload that will run in the background.
-	 * -  sync: resolve() will only return resolved when the
-	 *          stored file working copy has finished reloading.
+	 * allows to trigger a reload of it to fetch the latest contents.
 	 */
-	reload?: {
-		async: boolean
+	readonly reload?: {
+
+		/**
+		 * Controls whether the reload happens in the background
+		 * or whether `resolve` will await the reload to happen.
+		 */
+		readonly async: boolean;
+
+		/**
+		 * Controls whether to force reading the contents from the
+		 * underlying resource even if the resource did not change.
+		 */
+		readonly force?: boolean;
 	};
 }
 
@@ -127,6 +147,12 @@ export class StoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyModel>
 	private readonly _onDidChangeDirty = this._register(new Emitter<IStoredFileWorkingCopy<M>>());
 	readonly onDidChangeDirty = this._onDidChangeDirty.event;
 
+	private readonly _onDidChangeReadonly = this._register(new Emitter<IStoredFileWorkingCopy<M>>());
+	readonly onDidChangeReadonly = this._onDidChangeReadonly.event;
+
+	private readonly _onDidChangeOrphaned = this._register(new Emitter<IStoredFileWorkingCopy<M>>());
+	readonly onDidChangeOrphaned = this._onDidChangeOrphaned.event;
+
 	private readonly _onDidSaveError = this._register(new Emitter<IStoredFileWorkingCopy<M>>());
 	readonly onDidSaveError = this._onDidSaveError.event;
 
@@ -135,6 +161,9 @@ export class StoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyModel>
 
 	private readonly _onDidRevert = this._register(new Emitter<IStoredFileWorkingCopy<M>>());
 	readonly onDidRevert = this._onDidRevert.event;
+
+	private readonly _onDidRemove = this._register(new Emitter<URI>());
+	readonly onDidRemove = this._onDidRemove.event;
 
 	//#endregion
 
@@ -153,13 +182,13 @@ export class StoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyModel>
 		@IWorkingCopyFileService private readonly workingCopyFileService: IWorkingCopyFileService,
 		@IWorkingCopyBackupService workingCopyBackupService: IWorkingCopyBackupService,
 		@IUriIdentityService private readonly uriIdentityService: IUriIdentityService,
-		@ITextFileService private readonly textFileService: ITextFileService,
 		@IFilesConfigurationService private readonly filesConfigurationService: IFilesConfigurationService,
 		@IWorkingCopyService private readonly workingCopyService: IWorkingCopyService,
 		@INotificationService private readonly notificationService: INotificationService,
 		@IWorkingCopyEditorService private readonly workingCopyEditorService: IWorkingCopyEditorService,
 		@IEditorService private readonly editorService: IEditorService,
-		@IElevatedFileService private readonly elevatedFileService: IElevatedFileService
+		@IElevatedFileService private readonly elevatedFileService: IElevatedFileService,
+		@IProgressService private readonly progressService: IProgressService
 	) {
 		super(fileService, logService, workingCopyBackupService);
 
@@ -181,17 +210,31 @@ export class StoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyModel>
 		this._register(this.workingCopyFileService.onDidRunWorkingCopyFileOperation(e => this.onDidRunWorkingCopyFileOperation(e)));
 
 		// Lifecycle
-		this.lifecycleService.onWillShutdown(event => event.join(this.onWillShutdown(), 'join.fileWorkingCopyManager'));
+		if (isWeb) {
+			this._register(this.lifecycleService.onBeforeShutdown(event => event.veto(this.onBeforeShutdownWeb(), 'veto.fileWorkingCopyManager')));
+		} else {
+			this._register(this.lifecycleService.onWillShutdown(event => event.join(this.onWillShutdownDesktop(), { id: 'join.fileWorkingCopyManager', label: localize('join.fileWorkingCopyManager', "Saving working copies") })));
+		}
 	}
 
-	private async onWillShutdown(): Promise<void> {
-		let fileWorkingCopies: IStoredFileWorkingCopy<M>[];
+	private onBeforeShutdownWeb(): boolean {
+		if (this.workingCopies.some(workingCopy => workingCopy.hasState(StoredFileWorkingCopyState.PENDING_SAVE))) {
+			// stored file working copies are pending to be saved:
+			// veto because web does not support long running shutdown
+			return true;
+		}
+
+		return false;
+	}
+
+	private async onWillShutdownDesktop(): Promise<void> {
+		let pendingSavedWorkingCopies: IStoredFileWorkingCopy<M>[];
 
 		// As long as stored file working copies are pending to be saved, we prolong the shutdown
 		// until that has happened to ensure we are not shutting down in the middle of
 		// writing to the working copy (https://github.com/microsoft/vscode/issues/116600).
-		while ((fileWorkingCopies = this.workingCopies.filter(workingCopy => workingCopy.hasState(StoredFileWorkingCopyState.PENDING_SAVE))).length > 0) {
-			await Promises.settled(fileWorkingCopies.map(workingCopy => workingCopy.joinState(StoredFileWorkingCopyState.PENDING_SAVE)));
+		while ((pendingSavedWorkingCopies = this.workingCopies.filter(workingCopy => workingCopy.hasState(StoredFileWorkingCopyState.PENDING_SAVE))).length > 0) {
+			await Promises.settled(pendingSavedWorkingCopies.map(workingCopy => workingCopy.joinState(StoredFileWorkingCopyState.PENDING_SAVE)));
 		}
 	}
 
@@ -202,7 +245,7 @@ export class StoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyModel>
 		// Resolve working copies again for file systems that changed
 		// capabilities to fetch latest metadata (e.g. readonly)
 		// into all working copies.
-		this.queueWorkingCopyResolves(e.scheme);
+		this.queueWorkingCopyReloads(e.scheme);
 	}
 
 	private onDidChangeFileSystemProviderRegistrations(e: IFileSystemProviderRegistrationEvent): void {
@@ -215,7 +258,7 @@ export class StoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyModel>
 		// and register the same provider with different capabilities,
 		// so we want to ensure to fetch latest metadata (e.g. readonly)
 		// into all working copies.
-		this.queueWorkingCopyResolves(e.scheme);
+		this.queueWorkingCopyReloads(e.scheme);
 	}
 
 	private onDidFilesChange(e: FileChangesEvent): void {
@@ -224,15 +267,15 @@ export class StoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyModel>
 		// the working copy. We also consider the added event
 		// because it could be that a file was added and updated
 		// right after.
-		this.queueWorkingCopyResolves(e);
+		this.queueWorkingCopyReloads(e);
 	}
 
-	private queueWorkingCopyResolves(scheme: string): void;
-	private queueWorkingCopyResolves(e: FileChangesEvent): void;
-	private queueWorkingCopyResolves(schemeOrEvent: string | FileChangesEvent): void {
+	private queueWorkingCopyReloads(scheme: string): void;
+	private queueWorkingCopyReloads(e: FileChangesEvent): void;
+	private queueWorkingCopyReloads(schemeOrEvent: string | FileChangesEvent): void {
 		for (const workingCopy of this.workingCopies) {
-			if (workingCopy.isDirty() || !workingCopy.isResolved()) {
-				continue; // require a resolved, saved working copy to continue
+			if (workingCopy.isDirty()) {
+				continue; // never reload dirty working copies
 			}
 
 			let resolveWorkingCopy = false;
@@ -243,21 +286,21 @@ export class StoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyModel>
 			}
 
 			if (resolveWorkingCopy) {
-				this.queueWorkingCopyResolve(workingCopy);
+				this.queueWorkingCopyReload(workingCopy);
 			}
 		}
 	}
 
-	private queueWorkingCopyResolve(workingCopy: IStoredFileWorkingCopy<M>): void {
+	private queueWorkingCopyReload(workingCopy: IStoredFileWorkingCopy<M>): void {
 
 		// Resolves a working copy to update (use a queue to prevent accumulation of
 		// resolve when the resolving actually takes long. At most we only want the
 		// queue to have a size of 2 (1 running resolve and 1 queued resolve).
-		const queue = this.workingCopyResolveQueue.queueFor(workingCopy.resource);
-		if (queue.size <= 1) {
-			queue.queue(async () => {
+		const queueSize = this.workingCopyResolveQueue.queueSize(workingCopy.resource);
+		if (queueSize <= 1) {
+			this.workingCopyResolveQueue.queueFor(workingCopy.resource, async () => {
 				try {
-					await workingCopy.resolve();
+					await this.reload(workingCopy);
 				} catch (error) {
 					this.logService.error(error);
 				}
@@ -269,14 +312,14 @@ export class StoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyModel>
 
 	//#region Working Copy File Events
 
-	private readonly mapCorrelationIdToWorkingCopiesToRestore = new Map<number, { source: URI, target: URI, snapshot?: VSBufferReadableStream; }[]>();
+	private readonly mapCorrelationIdToWorkingCopiesToRestore = new Map<number, { source: URI; target: URI; snapshot?: VSBufferReadableStream }[]>();
 
 	private onWillRunWorkingCopyFileOperation(e: WorkingCopyFileEvent): void {
 
 		// Move / Copy: remember working copies to restore after the operation
 		if (e.operation === FileOperation.MOVE || e.operation === FileOperation.COPY) {
 			e.waitUntil((async () => {
-				const workingCopiesToRestore: { source: URI, target: URI, snapshot?: VSBufferReadableStream; }[] = [];
+				const workingCopiesToRestore: { source: URI; target: URI; snapshot?: VSBufferReadableStream }[] = [];
 
 				for (const { source, target } of e.files) {
 					if (source) {
@@ -312,7 +355,7 @@ export class StoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyModel>
 							workingCopiesToRestore.push({
 								source: sourceResource,
 								target: targetResource,
-								snapshot: sourceWorkingCopy.isDirty() ? await sourceWorkingCopy.model?.snapshot(CancellationToken.None) : undefined
+								snapshot: sourceWorkingCopy.isDirty() ? await sourceWorkingCopy.model?.snapshot(SnapshotContext.Save, CancellationToken.None) : undefined
 							});
 						}
 					}
@@ -331,15 +374,16 @@ export class StoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyModel>
 			if (workingCopiesToRestore) {
 				this.mapCorrelationIdToWorkingCopiesToRestore.delete(e.correlationId);
 
-				workingCopiesToRestore.forEach(workingCopy => {
+				for (const workingCopy of workingCopiesToRestore) {
 
-					// Snapshot presence means this working copy used to be dirty and so we restore that
+					// Snapshot presence means this working copy used to be modified and so we restore that
 					// flag. we do NOT have to restore the content because the working copy was only soft
-					// reverted and did not loose its original dirty contents.
+					// reverted and did not loose its original modified contents.
+
 					if (workingCopy.snapshot) {
-						this.get(workingCopy.source)?.markDirty();
+						this.get(workingCopy.source)?.markModified();
 					}
-				});
+				}
 			}
 		}
 	}
@@ -369,12 +413,17 @@ export class StoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyModel>
 
 						await Promises.settled(workingCopiesToRestore.map(async workingCopyToRestore => {
 
+							// From this moment on, only operate on the canonical resource
+							// to fix a potential data loss issue:
+							// https://github.com/microsoft/vscode/issues/211374
+							const target = this.uriIdentityService.asCanonicalUri(workingCopyToRestore.target);
+
 							// Restore the working copy at the target. if we have previous dirty content, we pass it
 							// over to be used, otherwise we force a reload from disk. this is important
 							// because we know the file has changed on disk after the move and the working copy might
 							// have still existed with the previous state. this ensures that the working copy is not
 							// tracking a stale state.
-							await this.resolve(workingCopyToRestore.target, {
+							await this.resolve(target, {
 								reload: { async: false }, // enforce a reload
 								contents: workingCopyToRestore.snapshot
 							});
@@ -387,28 +436,63 @@ export class StoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyModel>
 
 	//#endregion
 
-	//#region Resolve
+	//#region Reload & Resolve
+
+	private async reload(workingCopy: IStoredFileWorkingCopy<M>): Promise<void> {
+
+		// Await a pending working copy resolve first before proceeding
+		// to ensure that we never resolve a working copy more than once
+		// in parallel.
+		await this.joinPendingResolves(workingCopy.resource);
+
+		if (workingCopy.isDirty() || workingCopy.isDisposed() || !this.has(workingCopy.resource)) {
+			return; // the working copy possibly got dirty or disposed, so return early then
+		}
+
+		// Trigger reload
+		await this.doResolve(workingCopy, { reload: { async: false } });
+	}
 
 	async resolve(resource: URI, options?: IStoredFileWorkingCopyManagerResolveOptions): Promise<IStoredFileWorkingCopy<M>> {
 
 		// Await a pending working copy resolve first before proceeding
 		// to ensure that we never resolve a working copy more than once
-		// in parallel
-		const pendingResolve = this.joinPendingResolve(resource);
+		// in parallel.
+		const pendingResolve = this.joinPendingResolves(resource);
 		if (pendingResolve) {
 			await pendingResolve;
 		}
 
+		// Trigger resolve
+		return this.doResolve(resource, options);
+	}
+
+	private async doResolve(resourceOrWorkingCopy: URI | IStoredFileWorkingCopy<M>, options?: IStoredFileWorkingCopyManagerResolveOptions): Promise<IStoredFileWorkingCopy<M>> {
+		let workingCopy: IStoredFileWorkingCopy<M> | undefined;
+		let resource: URI;
+		if (URI.isUri(resourceOrWorkingCopy)) {
+			resource = resourceOrWorkingCopy;
+			workingCopy = this.get(resource);
+		} else {
+			resource = resourceOrWorkingCopy.resource;
+			workingCopy = resourceOrWorkingCopy;
+		}
+
 		let workingCopyResolve: Promise<void>;
-		let workingCopy = this.get(resource);
 		let didCreateWorkingCopy = false;
+
+		const resolveOptions: IStoredFileWorkingCopyResolveOptions = {
+			contents: options?.contents,
+			forceReadFromFile: options?.reload?.force,
+			limits: options?.limits
+		};
 
 		// Working copy exists
 		if (workingCopy) {
 
 			// Always reload if contents are provided
 			if (options?.contents) {
-				workingCopyResolve = workingCopy.resolve(options);
+				workingCopyResolve = workingCopy.resolve(resolveOptions);
 			}
 
 			// Reload async or sync based on options
@@ -416,13 +500,19 @@ export class StoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyModel>
 
 				// Async reload: trigger a reload but return immediately
 				if (options.reload.async) {
-					workingCopy.resolve(options);
 					workingCopyResolve = Promise.resolve();
+					(async () => {
+						try {
+							await workingCopy.resolve(resolveOptions);
+						} catch (error) {
+							onUnexpectedError(error);
+						}
+					})();
 				}
 
 				// Sync reload: do not return until working copy reloaded
 				else {
-					workingCopyResolve = workingCopy.resolve(options);
+					workingCopyResolve = workingCopy.resolve(resolveOptions);
 				}
 			}
 
@@ -441,12 +531,13 @@ export class StoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyModel>
 				resource,
 				this.labelService.getUriBasenameLabel(resource),
 				this.modelFactory,
-				this.fileService, this.logService, this.textFileService, this.filesConfigurationService,
+				async options => { await this.resolve(resource, { ...options, reload: { async: false } }); },
+				this.fileService, this.logService, this.workingCopyFileService, this.filesConfigurationService,
 				this.workingCopyBackupService, this.workingCopyService, this.notificationService, this.workingCopyEditorService,
-				this.editorService, this.elevatedFileService
+				this.editorService, this.elevatedFileService, this.progressService
 			);
 
-			workingCopyResolve = workingCopy.resolve(options);
+			workingCopyResolve = workingCopy.resolve(resolveOptions);
 
 			this.registerWorkingCopy(workingCopy);
 		}
@@ -468,41 +559,62 @@ export class StoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyModel>
 		}
 
 		try {
-
-			// Wait for working copy to resolve
 			await workingCopyResolve;
-
-			// Remove from pending resolves
-			this.mapResourceToPendingWorkingCopyResolve.delete(resource);
-
-			// Stored file working copy can be dirty if a backup was restored, so we make sure to
-			// have this event delivered if we created the working copy here
-			if (didCreateWorkingCopy && workingCopy.isDirty()) {
-				this._onDidChangeDirty.fire(workingCopy);
-			}
-
-			return workingCopy;
 		} catch (error) {
 
-			// Free resources of this invalid working copy
-			if (workingCopy) {
+			// Automatically dispose the working copy if we created
+			// it because we cannot dispose a working copy we do not
+			// own (https://github.com/microsoft/vscode/issues/138850)
+			if (didCreateWorkingCopy) {
 				workingCopy.dispose();
 			}
 
+			throw error;
+		} finally {
+
 			// Remove from pending resolves
 			this.mapResourceToPendingWorkingCopyResolve.delete(resource);
-
-			throw error;
 		}
+
+		// Stored file working copy can be dirty if a backup was restored, so we make sure to
+		// have this event delivered if we created the working copy here
+		if (didCreateWorkingCopy && workingCopy.isDirty()) {
+			this._onDidChangeDirty.fire(workingCopy);
+		}
+
+		return workingCopy;
 	}
 
-	private joinPendingResolve(resource: URI): Promise<void> | undefined {
+	private joinPendingResolves(resource: URI): Promise<void> | undefined {
 		const pendingWorkingCopyResolve = this.mapResourceToPendingWorkingCopyResolve.get(resource);
-		if (pendingWorkingCopyResolve) {
-			return pendingWorkingCopyResolve.then(undefined, error => {/* ignore any error here, it will bubble to the original requestor*/ });
+		if (!pendingWorkingCopyResolve) {
+			return;
 		}
 
-		return undefined;
+		return this.doJoinPendingResolves(resource);
+	}
+
+	private async doJoinPendingResolves(resource: URI): Promise<void> {
+
+		// While we have pending working copy resolves, ensure
+		// to await the last one finishing before returning.
+		// This prevents a race when multiple clients await
+		// the pending resolve and then all trigger the resolve
+		// at the same time.
+		let currentWorkingCopyResolve: Promise<void> | undefined;
+		while (this.mapResourceToPendingWorkingCopyResolve.has(resource)) {
+			const nextPendingWorkingCopyResolve = this.mapResourceToPendingWorkingCopyResolve.get(resource);
+			if (nextPendingWorkingCopyResolve === currentWorkingCopyResolve) {
+				return; // already awaited on - return
+			}
+
+			currentWorkingCopyResolve = nextPendingWorkingCopyResolve;
+			try {
+				await nextPendingWorkingCopyResolve;
+			} catch (error) {
+				// ignore any error here, it will bubble to the original requestor
+			}
+		}
 	}
 
 	private registerWorkingCopy(workingCopy: IStoredFileWorkingCopy<M>): void {
@@ -511,23 +623,31 @@ export class StoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyModel>
 		const workingCopyListeners = new DisposableStore();
 		workingCopyListeners.add(workingCopy.onDidResolve(() => this._onDidResolve.fire(workingCopy)));
 		workingCopyListeners.add(workingCopy.onDidChangeDirty(() => this._onDidChangeDirty.fire(workingCopy)));
+		workingCopyListeners.add(workingCopy.onDidChangeReadonly(() => this._onDidChangeReadonly.fire(workingCopy)));
+		workingCopyListeners.add(workingCopy.onDidChangeOrphaned(() => this._onDidChangeOrphaned.fire(workingCopy)));
 		workingCopyListeners.add(workingCopy.onDidSaveError(() => this._onDidSaveError.fire(workingCopy)));
-		workingCopyListeners.add(workingCopy.onDidSave(reason => this._onDidSave.fire({ workingCopy: workingCopy, reason })));
+		workingCopyListeners.add(workingCopy.onDidSave(e => this._onDidSave.fire({ workingCopy, ...e })));
 		workingCopyListeners.add(workingCopy.onDidRevert(() => this._onDidRevert.fire(workingCopy)));
 
 		// Keep for disposal
 		this.mapResourceToWorkingCopyListeners.set(workingCopy.resource, workingCopyListeners);
 	}
 
-	protected override remove(resource: URI): void {
-		super.remove(resource);
+	protected override remove(resource: URI): boolean {
+		const removed = super.remove(resource);
 
-		// Dispose any exsting working copy listeners
+		// Dispose any existing working copy listeners
 		const workingCopyListener = this.mapResourceToWorkingCopyListeners.get(resource);
 		if (workingCopyListener) {
 			dispose(workingCopyListener);
 			this.mapResourceToWorkingCopyListeners.delete(resource);
 		}
+
+		if (removed) {
+			this._onDidRemove.fire(resource);
+		}
+
+		return removed;
 	}
 
 	//#endregion
@@ -550,8 +670,8 @@ export class StoredFileWorkingCopyManager<M extends IStoredFileWorkingCopyModel>
 
 	private async doCanDispose(workingCopy: IStoredFileWorkingCopy<M>): Promise<true> {
 
-		// If we have a pending working copy resolve, await it first and then try again
-		const pendingResolve = this.joinPendingResolve(workingCopy.resource);
+		// Await any pending resolves first before proceeding
+		const pendingResolve = this.joinPendingResolves(workingCopy.resource);
 		if (pendingResolve) {
 			await pendingResolve;
 

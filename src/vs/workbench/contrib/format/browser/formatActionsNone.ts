@@ -3,26 +3,18 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { KeyCode, KeyMod } from 'vs/base/common/keyCodes';
-import { ICodeEditor } from 'vs/editor/browser/editorBrowser';
-import { EditorAction, registerEditorAction, ServicesAccessor } from 'vs/editor/browser/editorExtensions';
-import { EditorContextKeys } from 'vs/editor/common/editorContextKeys';
-import { DocumentFormattingEditProviderRegistry } from 'vs/editor/common/modes';
-import * as nls from 'vs/nls';
-import { ContextKeyExpr } from 'vs/platform/contextkey/common/contextkey';
-import { KeybindingWeight } from 'vs/platform/keybinding/common/keybindingsRegistry';
-import { ICommandService } from 'vs/platform/commands/common/commands';
-import { IViewletService } from 'vs/workbench/services/viewlet/browser/viewlet';
-import { INotificationService, Severity } from 'vs/platform/notification/common/notification';
-import { VIEWLET_ID, IExtensionsViewPaneContainer } from 'vs/workbench/contrib/extensions/common/extensions';
-import { IDialogService } from 'vs/platform/dialogs/common/dialogs';
-
-async function showExtensionQuery(viewletService: IViewletService, query: string) {
-	const viewlet = await viewletService.openViewlet(VIEWLET_ID, true);
-	if (viewlet) {
-		(viewlet?.getViewPaneContainer() as IExtensionsViewPaneContainer).search(query);
-	}
-}
+import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
+import { ICodeEditor } from '../../../../editor/browser/editorBrowser.js';
+import { EditorAction, registerEditorAction, ServicesAccessor } from '../../../../editor/browser/editorExtensions.js';
+import { EditorContextKeys } from '../../../../editor/common/editorContextKeys.js';
+import * as nls from '../../../../nls.js';
+import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
+import { KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { INotificationService } from '../../../../platform/notification/common/notification.js';
+import { IExtensionsWorkbenchService } from '../../extensions/common/extensions.js';
+import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
+import { ILanguageFeaturesService } from '../../../../editor/common/services/languageFeatures.js';
 
 registerEditorAction(class FormatDocumentMultipleAction extends EditorAction {
 
@@ -34,8 +26,8 @@ registerEditorAction(class FormatDocumentMultipleAction extends EditorAction {
 			precondition: ContextKeyExpr.and(EditorContextKeys.writable, EditorContextKeys.hasDocumentFormattingProvider.toNegated()),
 			kbOpts: {
 				kbExpr: EditorContextKeys.editorTextFocus,
-				primary: KeyMod.Shift | KeyMod.Alt | KeyCode.KEY_F,
-				linux: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KEY_I },
+				primary: KeyMod.Shift | KeyMod.Alt | KeyCode.KeyF,
+				linux: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyI },
 				weight: KeybindingWeight.EditorContrib,
 			}
 		});
@@ -47,12 +39,13 @@ registerEditorAction(class FormatDocumentMultipleAction extends EditorAction {
 		}
 
 		const commandService = accessor.get(ICommandService);
-		const viewletService = accessor.get(IViewletService);
+		const extensionsWorkbenchService = accessor.get(IExtensionsWorkbenchService);
 		const notificationService = accessor.get(INotificationService);
 		const dialogService = accessor.get(IDialogService);
+		const languageFeaturesService = accessor.get(ILanguageFeaturesService);
 
 		const model = editor.getModel();
-		const formatterCount = DocumentFormattingEditProviderRegistry.all(model).length;
+		const formatterCount = languageFeaturesService.documentFormattingEditProvider.all(model).length;
 
 		if (formatterCount > 1) {
 			return commandService.executeCommand('editor.action.formatDocument.multiple');
@@ -61,15 +54,14 @@ registerEditorAction(class FormatDocumentMultipleAction extends EditorAction {
 		} else if (model.isTooLargeForSyncing()) {
 			notificationService.warn(nls.localize('too.large', "This file cannot be formatted because it is too large"));
 		} else {
-			const langName = model.getLanguageIdentifier().language;
+			const langName = model.getLanguageId();
 			const message = nls.localize('no.provider', "There is no formatter for '{0}' files installed.", langName);
-			const res = await dialogService.show(
-				Severity.Info,
+			const { confirmed } = await dialogService.confirm({
 				message,
-				[nls.localize('cancel', "Cancel"), nls.localize('install.formatter', "Install Formatter...")]
-			);
-			if (res.choice === 1) {
-				showExtensionQuery(viewletService, `category:formatters ${langName}`);
+				primaryButton: nls.localize({ key: 'install.formatter', comment: ['&& denotes a mnemonic'] }, "&&Install Formatter...")
+			});
+			if (confirmed) {
+				extensionsWorkbenchService.openSearch(`category:formatters ${langName}`);
 			}
 		}
 	}

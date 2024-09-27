@@ -3,19 +3,20 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { KeyCode, KeyMod } from 'vs/base/common/keyCodes';
-import { KeybindingWeight, KeybindingsRegistry } from 'vs/platform/keybinding/common/keybindingsRegistry';
-import { ITerminalProfileResolverService, TerminalCommandId } from 'vs/workbench/contrib/terminal/common/terminal';
-import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
-import { BrowserTerminalProfileResolverService } from 'vs/workbench/contrib/terminal/browser/terminalProfileResolverService';
+import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
+import { KeybindingWeight, KeybindingsRegistry } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
+import { ITerminalProfileResolverService, TerminalCommandId } from '../common/terminal.js';
+import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
+import { BrowserTerminalProfileResolverService } from './terminalProfileResolverService.js';
+import { TerminalContextKeys } from '../common/terminalContextKey.js';
 
-registerSingleton(ITerminalProfileResolverService, BrowserTerminalProfileResolverService, true);
+registerSingleton(ITerminalProfileResolverService, BrowserTerminalProfileResolverService, InstantiationType.Delayed);
 
 // Register standard external terminal keybinding as integrated terminal when in web as the
 // external terminal is not available
 KeybindingsRegistry.registerKeybindingRule({
 	id: TerminalCommandId.New,
 	weight: KeybindingWeight.WorkbenchContrib,
-	when: undefined,
-	primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KEY_C
+	when: TerminalContextKeys.notFocus,
+	primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyC
 });

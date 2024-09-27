@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as strings from 'vs/base/common/strings';
+import * as strings from './strings.js';
 
 /**
  * Return a hash value for an object.
@@ -34,7 +34,7 @@ export function doHash(obj: any, hashVal: number): number {
 	}
 }
 
-function numberHash(val: number, initialHashVal: number): number {
+export function numberHash(val: number, initialHashVal: number): number {
 	return (((initialHashVal << 5) - initialHashVal) + val) | 0;  // hashVal * 31 + ch, keep as int32
 }
 

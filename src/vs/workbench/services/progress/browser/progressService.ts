@@ -3,29 +3,31 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import 'vs/css!./media/progressService';
+import './media/progressService.css';
 
-import { localize } from 'vs/nls';
-import { IDisposable, dispose, DisposableStore, Disposable, toDisposable } from 'vs/base/common/lifecycle';
-import { IProgressService, IProgressOptions, IProgressStep, ProgressLocation, IProgress, Progress, IProgressCompositeOptions, IProgressNotificationOptions, IProgressRunner, IProgressIndicator, IProgressWindowOptions, IProgressDialogOptions } from 'vs/platform/progress/common/progress';
-import { IViewletService } from 'vs/workbench/services/viewlet/browser/viewlet';
-import { StatusbarAlignment, IStatusbarService, IStatusbarEntryAccessor, IStatusbarEntry } from 'vs/workbench/services/statusbar/common/statusbar';
-import { RunOnceScheduler, timeout } from 'vs/base/common/async';
-import { ProgressBadge, IActivityService } from 'vs/workbench/services/activity/common/activity';
-import { INotificationService, Severity, INotificationHandle } from 'vs/platform/notification/common/notification';
-import { Action } from 'vs/base/common/actions';
-import { Event, Emitter } from 'vs/base/common/event';
-import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
-import { ILayoutService } from 'vs/platform/layout/browser/layoutService';
-import { Dialog } from 'vs/base/browser/ui/dialog/dialog';
-import { attachDialogStyler } from 'vs/platform/theme/common/styler';
-import { IThemeService } from 'vs/platform/theme/common/themeService';
-import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
-import { StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
-import { EventHelper } from 'vs/base/browser/dom';
-import { IPanelService } from 'vs/workbench/services/panel/common/panelService';
-import { parseLinkedText } from 'vs/base/common/linkedText';
-import { IViewsService, IViewDescriptorService, ViewContainerLocation } from 'vs/workbench/common/views';
+import { localize } from '../../../../nls.js';
+import { IDisposable, dispose, DisposableStore, Disposable, toDisposable } from '../../../../base/common/lifecycle.js';
+import { IProgressService, IProgressOptions, IProgressStep, ProgressLocation, IProgress, Progress, IProgressCompositeOptions, IProgressNotificationOptions, IProgressRunner, IProgressIndicator, IProgressWindowOptions, IProgressDialogOptions } from '../../../../platform/progress/common/progress.js';
+import { StatusbarAlignment, IStatusbarService, IStatusbarEntryAccessor, IStatusbarEntry } from '../../statusbar/browser/statusbar.js';
+import { DeferredPromise, RunOnceScheduler, timeout } from '../../../../base/common/async.js';
+import { ProgressBadge, IActivityService } from '../../activity/common/activity.js';
+import { INotificationService, Severity, INotificationHandle, NotificationPriority, isNotificationSource, NotificationsFilter } from '../../../../platform/notification/common/notification.js';
+import { Action } from '../../../../base/common/actions.js';
+import { Event, Emitter } from '../../../../base/common/event.js';
+import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
+import { ILayoutService } from '../../../../platform/layout/browser/layoutService.js';
+import { Dialog } from '../../../../base/browser/ui/dialog/dialog.js';
+import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
+import { StandardKeyboardEvent } from '../../../../base/browser/keyboardEvent.js';
+import { EventHelper } from '../../../../base/browser/dom.js';
+import { parseLinkedText } from '../../../../base/common/linkedText.js';
+import { IViewDescriptorService, ViewContainerLocation } from '../../../common/views.js';
+import { IViewsService } from '../../views/common/viewsService.js';
+import { IPaneCompositePartService } from '../../panecomposite/browser/panecomposite.js';
+import { stripIcons } from '../../../../base/common/iconLabels.js';
+import { defaultButtonStyles, defaultCheckboxStyles, defaultDialogStyles, defaultInputBoxStyles } from '../../../../platform/theme/browser/defaultStyles.js';
+import { ResultKind } from '../../../../platform/keybinding/common/keybindingResolver.js';
+import { IUserActivityService } from '../../userActivity/common/userActivityService.js';
 
 export class ProgressService extends Disposable implements IProgressService {
 
@@ -33,55 +35,80 @@ export class ProgressService extends Disposable implements IProgressService {
 
 	constructor(
 		@IActivityService private readonly activityService: IActivityService,
-		@IViewletService private readonly viewletService: IViewletService,
+		@IPaneCompositePartService private readonly paneCompositeService: IPaneCompositePartService,
 		@IViewDescriptorService private readonly viewDescriptorService: IViewDescriptorService,
 		@IViewsService private readonly viewsService: IViewsService,
-		@IPanelService private readonly panelService: IPanelService,
 		@INotificationService private readonly notificationService: INotificationService,
 		@IStatusbarService private readonly statusbarService: IStatusbarService,
 		@ILayoutService private readonly layoutService: ILayoutService,
-		@IThemeService private readonly themeService: IThemeService,
-		@IKeybindingService private readonly keybindingService: IKeybindingService
+		@IKeybindingService private readonly keybindingService: IKeybindingService,
+		@IUserActivityService private readonly userActivityService: IUserActivityService,
 	) {
 		super();
 	}
 
-	async withProgress<R = unknown>(options: IProgressOptions, task: (progress: IProgress<IProgressStep>) => Promise<R>, onDidCancel?: (choice?: number) => void): Promise<R> {
+	async withProgress<R = unknown>(options: IProgressOptions, originalTask: (progress: IProgress<IProgressStep>) => Promise<R>, onDidCancel?: (choice?: number) => void): Promise<R> {
 		const { location } = options;
-		if (typeof location === 'string') {
-			if (this.viewletService.getProgressIndicator(location)) {
-				return this.withViewletProgress(location, task, { ...options, location });
+
+		const task = async (progress: IProgress<IProgressStep>) => {
+			const activeLock = this.userActivityService.markActive({ whenHeldFor: 15_000 });
+			try {
+				return await originalTask(progress);
+			} finally {
+				activeLock.dispose();
+			}
+		};
+
+		const handleStringLocation = (location: string) => {
+			const viewContainer = this.viewDescriptorService.getViewContainerById(location);
+			if (viewContainer) {
+				const viewContainerLocation = this.viewDescriptorService.getViewContainerLocation(viewContainer);
+				if (viewContainerLocation !== null) {
+					return this.withPaneCompositeProgress(location, viewContainerLocation, task, { ...options, location });
+				}
 			}
 
-			if (this.panelService.getProgressIndicator(location)) {
-				return this.withPanelProgress(location, task, { ...options, location });
-			}
-
-			if (this.viewsService.getViewProgressIndicator(location)) {
+			if (this.viewDescriptorService.getViewDescriptorById(location) !== null) {
 				return this.withViewProgress(location, task, { ...options, location });
 			}
 
 			throw new Error(`Bad progress location: ${location}`);
+		};
+
+		if (typeof location === 'string') {
+			return handleStringLocation(location);
 		}
 
 		switch (location) {
-			case ProgressLocation.Notification:
-				return this.withNotificationProgress({ ...options, location }, task, onDidCancel);
-			case ProgressLocation.Window:
+			case ProgressLocation.Notification: {
+				let priority = (options as IProgressNotificationOptions).priority;
+				if (priority !== NotificationPriority.URGENT) {
+					if (this.notificationService.getFilter() === NotificationsFilter.ERROR) {
+						priority = NotificationPriority.SILENT;
+					} else if (isNotificationSource(options.source) && this.notificationService.getFilter(options.source) === NotificationsFilter.ERROR) {
+						priority = NotificationPriority.SILENT;
+					}
+				}
+
+				return this.withNotificationProgress({ ...options, location, priority }, task, onDidCancel);
+			}
+			case ProgressLocation.Window: {
+				const type = (options as IProgressWindowOptions).type;
 				if ((options as IProgressWindowOptions).command) {
 					// Window progress with command get's shown in the status bar
-					return this.withWindowProgress({ ...options, location }, task);
+					return this.withWindowProgress({ ...options, location, type }, task);
 				}
 				// Window progress without command can be shown as silent notification
 				// which will first appear in the status bar and can then be brought to
 				// the front when clicking.
-				return this.withNotificationProgress({ delay: 150 /* default for ProgressLocation.Window */, ...options, silent: true, location: ProgressLocation.Notification }, task, onDidCancel);
+				return this.withNotificationProgress({ delay: 150 /* default for ProgressLocation.Window */, ...options, priority: NotificationPriority.SILENT, location: ProgressLocation.Notification, type }, task, onDidCancel);
+			}
 			case ProgressLocation.Explorer:
-				return this.withViewletProgress('workbench.view.explorer', task, { ...options, location });
+				return this.withPaneCompositeProgress('workbench.view.explorer', ViewContainerLocation.Sidebar, task, { ...options, location });
 			case ProgressLocation.Scm:
-				return this.withViewletProgress('workbench.view.scm', task, { ...options, location });
+				return handleStringLocation('workbench.scm');
 			case ProgressLocation.Extensions:
-				return this.withViewletProgress('workbench.view.extensions', task, { ...options, location });
+				return this.withPaneCompositeProgress('workbench.view.extensions', ViewContainerLocation.Sidebar, task, { ...options, location });
 			case ProgressLocation.Dialog:
 				return this.withDialogProgress(options, task, onDidCancel);
 			default:
@@ -89,7 +116,7 @@ export class ProgressService extends Disposable implements IProgressService {
 		}
 	}
 
-	private readonly windowProgressStack: [IProgressOptions, Progress<IProgressStep>][] = [];
+	private readonly windowProgressStack: [IProgressWindowOptions, Progress<IProgressStep>][] = [];
 	private windowProgressStatusEntry: IStatusbarEntryAccessor | undefined = undefined;
 
 	private withWindowProgress<R = unknown>(options: IProgressWindowOptions, callback: (progress: IProgress<{ message?: string }>) => Promise<R>): Promise<R> {
@@ -123,9 +150,9 @@ export class ProgressService extends Disposable implements IProgressService {
 		if (idx < this.windowProgressStack.length) {
 			const [options, progress] = this.windowProgressStack[idx];
 
-			let progressTitle = options.title;
-			let progressMessage = progress.value && progress.value.message;
-			let progressCommand = (<IProgressWindowOptions>options).command;
+			const progressTitle = options.title;
+			const progressMessage = progress.value && progress.value.message;
+			const progressCommand = (<IProgressWindowOptions>options).command;
 			let text: string;
 			let title: string;
 			const source = options.source && typeof options.source !== 'string' ? options.source.label : options.source;
@@ -154,7 +181,7 @@ export class ProgressService extends Disposable implements IProgressService {
 			const statusEntryProperties: IStatusbarEntry = {
 				name: localize('status.progress', "Progress Message"),
 				text,
-				showProgress: true,
+				showProgress: options.type || true,
 				ariaLabel: text,
 				tooltip: title,
 				command: progressCommand
@@ -226,13 +253,13 @@ export class ProgressService extends Disposable implements IProgressService {
 
 			// Create a promise that we can resolve as needed
 			// when the outside calls dispose on us
-			let promiseResolve: () => void;
-			const promise = new Promise<void>(resolve => promiseResolve = resolve);
+			const promise = new DeferredPromise<void>();
 
 			this.withWindowProgress({
 				location: ProgressLocation.Window,
 				title: options.title ? parseLinkedText(options.title).toString() : undefined, // convert markdown links => string
-				command: 'notifications.showList'
+				command: 'notifications.showList',
+				type: options.type
 			}, progress => {
 
 				function reportProgress(step: IProgressStep) {
@@ -250,19 +277,19 @@ export class ProgressService extends Disposable implements IProgressService {
 
 				// Continue to report progress as it happens
 				const onDidReportListener = progressStateModel.onDidReport(step => reportProgress(step));
-				promise.finally(() => onDidReportListener.dispose());
+				promise.p.finally(() => onDidReportListener.dispose());
 
 				// When the progress model gets disposed, we are done as well
-				Event.once(progressStateModel.onWillDispose)(() => promiseResolve());
+				Event.once(progressStateModel.onWillDispose)(() => promise.complete());
 
-				return promise;
+				return promise.p;
 			});
 
 			// Dispose means completing our promise
-			return toDisposable(() => promiseResolve());
+			return toDisposable(() => promise.complete());
 		};
 
-		const createNotification = (message: string, silent: boolean, increment?: number): INotificationHandle => {
+		const createNotification = (message: string, priority?: NotificationPriority, increment?: number): INotificationHandle => {
 			const notificationDisposables = new DisposableStore();
 
 			const primaryActions = options.primaryActions ? Array.from(options.primaryActions) : [];
@@ -302,11 +329,11 @@ export class ProgressService extends Disposable implements IProgressService {
 
 			const notification = this.notificationService.notify({
 				severity: Severity.Info,
-				message,
+				message: stripIcons(message), // status entries support codicons, but notifications do not (https://github.com/microsoft/vscode/issues/145722)
 				source: options.source,
 				actions: { primary: primaryActions, secondary: secondaryActions },
 				progress: typeof increment === 'number' && increment >= 0 ? { total: 100, worked: increment } : { infinite: true },
-				silent
+				priority
 			});
 
 			// Switch to window based progress once the notification
@@ -324,7 +351,7 @@ export class ProgressService extends Disposable implements IProgressService {
 				}
 			};
 			notificationDisposables.add(notification.onDidChangeVisibility(onVisibilityChange));
-			if (silent) {
+			if (priority === NotificationPriority.SILENT) {
 				onVisibilityChange(false);
 			}
 
@@ -361,10 +388,10 @@ export class ProgressService extends Disposable implements IProgressService {
 				// create notification now or after a delay
 				if (typeof options.delay === 'number' && options.delay > 0) {
 					if (typeof notificationTimeout !== 'number') {
-						notificationTimeout = setTimeout(() => notificationHandle = createNotification(titleAndMessage!, !!options.silent, step?.increment), options.delay);
+						notificationTimeout = setTimeout(() => notificationHandle = createNotification(titleAndMessage!, options.priority, step?.increment), options.delay);
 					}
 				} else {
-					notificationHandle = createNotification(titleAndMessage, !!options.silent, step?.increment);
+					notificationHandle = createNotification(titleAndMessage, options.priority, step?.increment);
 				}
 			}
 
@@ -407,13 +434,16 @@ export class ProgressService extends Disposable implements IProgressService {
 		return progressStateModel.promise;
 	}
 
-	private withViewletProgress<P extends Promise<R>, R = unknown>(viewletId: string, task: (progress: IProgress<IProgressStep>) => P, options: IProgressCompositeOptions): P {
+	private withPaneCompositeProgress<P extends Promise<R>, R = unknown>(paneCompositeId: string, viewContainerLocation: ViewContainerLocation, task: (progress: IProgress<IProgressStep>) => P, options: IProgressCompositeOptions): P {
 
 		// show in viewlet
-		const promise = this.withCompositeProgress(this.viewletService.getProgressIndicator(viewletId), task, options);
+		const progressIndicator = this.paneCompositeService.getProgressIndicator(paneCompositeId, viewContainerLocation);
+		const promise = progressIndicator ? this.withCompositeProgress(progressIndicator, task, options) : task({ report: () => { } });
 
 		// show on activity bar
-		this.showOnActivityBar<P, R>(viewletId, options, promise);
+		if (viewContainerLocation === ViewContainerLocation.Sidebar) {
+			this.showOnActivityBar<P, R>(paneCompositeId, options, promise);
+		}
 
 		return promise;
 	}
@@ -421,7 +451,8 @@ export class ProgressService extends Disposable implements IProgressService {
 	private withViewProgress<P extends Promise<R>, R = unknown>(viewId: string, task: (progress: IProgress<IProgressStep>) => P, options: IProgressCompositeOptions): P {
 
 		// show in viewlet
-		const promise = this.withCompositeProgress(this.viewsService.getViewProgressIndicator(viewId), task, options);
+		const progressIndicator = this.viewsService.getViewProgressIndicator(viewId);
+		const promise = progressIndicator ? this.withCompositeProgress(progressIndicator, task, options) : task({ report: () => { } });
 
 		const location = this.viewDescriptorService.getViewLocationById(viewId);
 		if (location !== ViewContainerLocation.Sidebar) {
@@ -443,7 +474,7 @@ export class ProgressService extends Disposable implements IProgressService {
 		let activityProgress: IDisposable;
 		let delayHandle: any = setTimeout(() => {
 			delayHandle = undefined;
-			const handle = this.activityService.showViewContainerActivity(viewletId, { badge: new ProgressBadge(() => ''), clazz: 'progress-badge', priority: 100 });
+			const handle = this.activityService.showViewContainerActivity(viewletId, { badge: new ProgressBadge(() => ''), priority: 100 });
 			const startTimeVisible = Date.now();
 			const minTimeVisible = 300;
 			activityProgress = {
@@ -465,39 +496,53 @@ export class ProgressService extends Disposable implements IProgressService {
 		});
 	}
 
-	private withPanelProgress<P extends Promise<R>, R = unknown>(panelid: string, task: (progress: IProgress<IProgressStep>) => P, options: IProgressCompositeOptions): P {
+	private withCompositeProgress<P extends Promise<R>, R = unknown>(progressIndicator: IProgressIndicator, task: (progress: IProgress<IProgressStep>) => P, options: IProgressCompositeOptions): P {
+		let discreteProgressRunner: IProgressRunner | undefined = undefined;
 
-		// show in panel
-		return this.withCompositeProgress(this.panelService.getProgressIndicator(panelid), task, options);
-	}
+		function updateProgress(stepOrTotal: IProgressStep | number | undefined): IProgressRunner | undefined {
 
-	private withCompositeProgress<P extends Promise<R>, R = unknown>(progressIndicator: IProgressIndicator | undefined, task: (progress: IProgress<IProgressStep>) => P, options: IProgressCompositeOptions): P {
-		let progressRunner: IProgressRunner | undefined = undefined;
+			// Figure out whether discrete progress applies
+			// by figuring out the "total" progress to show
+			// and the increment if any.
+			let total: number | undefined = undefined;
+			let increment: number | undefined = undefined;
+			if (typeof stepOrTotal !== 'undefined') {
+				if (typeof stepOrTotal === 'number') {
+					total = stepOrTotal;
+				} else if (typeof stepOrTotal.increment === 'number') {
+					total = stepOrTotal.total ?? 100; // always percentage based
+					increment = stepOrTotal.increment;
+				}
+			}
+
+			// Discrete
+			if (typeof total === 'number') {
+				if (!discreteProgressRunner) {
+					discreteProgressRunner = progressIndicator.show(total, options.delay);
+					promise.catch(() => undefined /* ignore */).finally(() => discreteProgressRunner?.done());
+				}
+
+				if (typeof increment === 'number') {
+					discreteProgressRunner.worked(increment);
+				}
+			}
+
+			// Infinite
+			else {
+				discreteProgressRunner?.done();
+				progressIndicator.showWhile(promise, options.delay);
+			}
+
+			return discreteProgressRunner;
+		}
 
 		const promise = task({
 			report: progress => {
-				if (!progressRunner) {
-					return;
-				}
-
-				if (typeof progress.increment === 'number') {
-					progressRunner.worked(progress.increment);
-				}
-
-				if (typeof progress.total === 'number') {
-					progressRunner.total(progress.total);
-				}
+				updateProgress(progress);
 			}
 		});
 
-		if (progressIndicator) {
-			if (typeof options.total === 'number') {
-				progressRunner = progressIndicator.show(options.total, options.delay);
-				promise.catch(() => undefined /* ignore */).finally(() => progressRunner ? progressRunner.done() : undefined);
-			} else {
-				progressIndicator.showWhile(promise, options.delay);
-			}
-		}
+		updateProgress(options.total);
 
 		return promise;
 	}
@@ -518,29 +563,36 @@ export class ProgressService extends Disposable implements IProgressService {
 
 		const createDialog = (message: string) => {
 			const buttons = options.buttons || [];
-			buttons.push(options.cancellable ? localize('cancel', "Cancel") : localize('dismiss', "Dismiss"));
+			if (!options.sticky) {
+				buttons.push(options.cancellable ? localize('cancel', "Cancel") : localize('dismiss', "Dismiss"));
+			}
 
 			dialog = new Dialog(
-				this.layoutService.container,
+				this.layoutService.activeContainer,
 				message,
 				buttons,
 				{
 					type: 'pending',
 					detail: options.detail,
 					cancelId: buttons.length - 1,
+					disableCloseAction: options.sticky,
+					disableDefaultAction: options.sticky,
 					keyEventProcessor: (event: StandardKeyboardEvent) => {
-						const resolved = this.keybindingService.softDispatch(event, this.layoutService.container);
-						if (resolved?.commandId) {
+						const resolved = this.keybindingService.softDispatch(event, this.layoutService.activeContainer);
+						if (resolved.kind === ResultKind.KbFound && resolved.commandId) {
 							if (!allowableCommands.includes(resolved.commandId)) {
 								EventHelper.stop(event, true);
 							}
 						}
-					}
+					},
+					buttonStyles: defaultButtonStyles,
+					checkboxStyles: defaultCheckboxStyles,
+					inputBoxStyles: defaultInputBoxStyles,
+					dialogStyles: defaultDialogStyles
 				}
 			);
 
 			disposables.add(dialog);
-			disposables.add(attachDialogStyler(dialog, this.themeService));
 
 			dialog.show().then(dialogResult => {
 				onDidCancel?.(dialogResult.button);
@@ -594,4 +646,4 @@ export class ProgressService extends Disposable implements IProgressService {
 	}
 }
 
-registerSingleton(IProgressService, ProgressService, true);
+registerSingleton(IProgressService, ProgressService, InstantiationType.Delayed);

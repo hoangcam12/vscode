@@ -3,13 +3,23 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
-import { isReadableStream, newWriteableStream, Readable, consumeReadable, peekReadable, consumeStream, ReadableStream, toStream, toReadable, transform, peekStream, isReadableBufferedStream, listenStream, prefixedReadable, prefixedStream } from 'vs/base/common/stream';
-import { timeout } from 'vs/base/common/async';
+import assert from 'assert';
+import { timeout } from '../../common/async.js';
+import { bufferToReadable, VSBuffer } from '../../common/buffer.js';
+import { CancellationTokenSource } from '../../common/cancellation.js';
+import { consumeReadable, consumeStream, isReadable, isReadableBufferedStream, isReadableStream, listenStream, newWriteableStream, peekReadable, peekStream, prefixedReadable, prefixedStream, Readable, ReadableStream, toReadable, toStream, transform } from '../../common/stream.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from './utils.js';
 
 suite('Stream', () => {
 
+	test('isReadable', () => {
+		assert.ok(!isReadable(undefined));
+		assert.ok(!isReadable(Object.create(null)));
+		assert.ok(isReadable(bufferToReadable(VSBuffer.fromString(''))));
+	});
+
 	test('isReadableStream', () => {
+		assert.ok(!isReadableStream(undefined));
 		assert.ok(!isReadableStream(Object.create(null)));
 		assert.ok(isReadableStream(newWriteableStream(d => d)));
 	});
@@ -147,10 +157,10 @@ suite('Stream', () => {
 		res = stream.write('3');
 		assert.ok(!res);
 
-		let promise1 = stream.write('4');
+		const promise1 = stream.write('4');
 		assert.ok(promise1 instanceof Promise);
 
-		let promise2 = stream.write('5');
+		const promise2 = stream.write('5');
 		assert.ok(promise2 instanceof Promise);
 
 		let drained1 = false;
@@ -343,6 +353,42 @@ suite('Stream', () => {
 		assert.strictEqual(end, true);
 	});
 
+	test('listenStream - cancellation', () => {
+		const stream = newWriteableStream<string>(strings => strings.join());
+
+		let error = false;
+		let end = false;
+		let data = '';
+
+		const cts = new CancellationTokenSource();
+
+		listenStream(stream, {
+			onData: d => {
+				data = d;
+			},
+			onError: e => {
+				error = true;
+			},
+			onEnd: () => {
+				end = true;
+			}
+		}, cts.token);
+
+		cts.cancel();
+
+		stream.write('Hello');
+		assert.strictEqual(data, '');
+
+		stream.write('World');
+		assert.strictEqual(data, '');
+
+		stream.error(new Error());
+		assert.strictEqual(error, false);
+
+		stream.end('Final Bit');
+		assert.strictEqual(end, false);
+	});
+
 	test('peekStream', async () => {
 		for (let i = 0; i < 5; i++) {
 			const stream = readableToStream(arrayToReadable(['1', '2', '3', '4', '5']));
@@ -469,4 +515,6 @@ suite('Stream', () => {
 		}
 		assert.ok(error);
 	});
+
+	ensureNoDisposablesAreLeakedInTestSuite();
 });

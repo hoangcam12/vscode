@@ -3,15 +3,16 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { distinct } from 'vs/base/common/arrays';
-import { Event } from 'vs/base/common/event';
-import { IDisposable, IReference } from 'vs/base/common/lifecycle';
-import { URI } from 'vs/base/common/uri';
-import { RawContextKey } from 'vs/platform/contextkey/common/contextkey';
-import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
-import * as nls from 'vs/nls';
-import { IRevertOptions, ISaveOptions } from 'vs/workbench/common/editor';
-import { ContributedEditorPriority, globMatchesResource, priorityToRank } from 'vs/workbench/services/editor/common/editorOverrideService';
+import { distinct } from '../../../../base/common/arrays.js';
+import { Event } from '../../../../base/common/event.js';
+import { IMarkdownString } from '../../../../base/common/htmlContent.js';
+import { IDisposable, IReference } from '../../../../base/common/lifecycle.js';
+import { URI } from '../../../../base/common/uri.js';
+import * as nls from '../../../../nls.js';
+import { RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
+import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
+import { IRevertOptions, ISaveOptions } from '../../../common/editor.js';
+import { globMatchesResource, priorityToRank, RegisteredEditorPriority } from '../../../services/editor/common/editorResolverService.js';
 
 export const ICustomEditorService = createDecorator<ICustomEditorService>('customEditorService');
 
@@ -37,11 +38,11 @@ export interface ICustomEditorService {
 	getUserConfiguredCustomEditors(resource: URI): CustomEditorInfoCollection;
 
 	registerCustomEditorCapabilities(viewType: string, options: CustomEditorCapabilities): IDisposable;
-	getCustomEditorCapabilities(viewType: string): CustomEditorCapabilities | undefined
+	getCustomEditorCapabilities(viewType: string): CustomEditorCapabilities | undefined;
 }
 
 export interface ICustomEditorModelManager {
-	getAllModels(resource: URI): Promise<ICustomEditorModel[]>
+	getAllModels(resource: URI): Promise<ICustomEditorModel[]>;
 
 	get(resource: URI, viewType: string): Promise<ICustomEditorModel | undefined>;
 
@@ -56,8 +57,9 @@ export interface ICustomEditorModel extends IDisposable {
 	readonly viewType: string;
 	readonly resource: URI;
 	readonly backupId: string | undefined;
+	readonly canHotExit: boolean;
 
-	isReadonly(): boolean;
+	isReadonly(): boolean | IMarkdownString;
 	readonly onDidChangeReadonly: Event<void>;
 
 	isOrphaned(): boolean;
@@ -86,7 +88,7 @@ export interface CustomEditorDescriptor {
 	readonly id: string;
 	readonly displayName: string;
 	readonly providerDisplayName: string;
-	readonly priority: ContributedEditorPriority;
+	readonly priority: RegisteredEditorPriority;
 	readonly selector: readonly CustomEditorSelector[];
 }
 
@@ -95,7 +97,7 @@ export class CustomEditorInfo implements CustomEditorDescriptor {
 	public readonly id: string;
 	public readonly displayName: string;
 	public readonly providerDisplayName: string;
-	public readonly priority: ContributedEditorPriority;
+	public readonly priority: RegisteredEditorPriority;
 	public readonly selector: readonly CustomEditorSelector[];
 
 	constructor(descriptor: CustomEditorDescriptor) {
@@ -130,8 +132,8 @@ export class CustomEditorInfoCollection {
 	public get defaultEditor(): CustomEditorInfo | undefined {
 		return this.allEditors.find(editor => {
 			switch (editor.priority) {
-				case ContributedEditorPriority.default:
-				case ContributedEditorPriority.builtin:
+				case RegisteredEditorPriority.default:
+				case RegisteredEditorPriority.builtin:
 					// A default editor must have higher priority than all other contributed editors.
 					return this.allEditors.every(otherEditor =>
 						otherEditor === editor || isLowerPriority(otherEditor, editor));

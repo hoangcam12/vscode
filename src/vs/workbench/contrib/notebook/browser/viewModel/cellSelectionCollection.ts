@@ -3,9 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Emitter, Event } from 'vs/base/common/event';
-import { Disposable } from 'vs/base/common/lifecycle';
-import { ICellRange } from 'vs/workbench/contrib/notebook/common/notebookRange';
+import { Emitter, Event } from '../../../../../base/common/event.js';
+import { Disposable } from '../../../../../base/common/lifecycle.js';
+import { ICellRange } from '../../common/notebookRange.js';
 
 function rangesEqual(a: ICellRange[], b: ICellRange[]) {
 	if (a.length !== b.length) {
@@ -21,14 +21,11 @@ function rangesEqual(a: ICellRange[], b: ICellRange[]) {
 	return true;
 }
 
-// Handle first, then we migrate to ICellRange competely
 // Challenge is List View talks about `element`, which needs extra work to convert to ICellRange as we support Folding and Cell Move
 export class NotebookCellSelectionCollection extends Disposable {
+
 	private readonly _onDidChangeSelection = this._register(new Emitter<string>());
 	get onDidChangeSelection(): Event<string> { return this._onDidChangeSelection.event; }
-	constructor() {
-		super();
-	}
 
 	private _primary: ICellRange | null = null;
 
@@ -36,10 +33,6 @@ export class NotebookCellSelectionCollection extends Disposable {
 
 	get selections(): ICellRange[] {
 		return this._selections;
-	}
-
-	get selection(): ICellRange {
-		return this._selections[0];
 	}
 
 	get focus(): ICellRange {
@@ -54,10 +47,6 @@ export class NotebookCellSelectionCollection extends Disposable {
 		if (changed || forceEventEmit) {
 			this._onDidChangeSelection.fire(source);
 		}
-	}
-
-	setFocus(selection: ICellRange | null, forceEventEmit: boolean, source: 'view' | 'model') {
-		this.setState(selection, this._selections, forceEventEmit, source);
 	}
 
 	setSelections(selections: ICellRange[], forceEventEmit: boolean, source: 'view' | 'model') {

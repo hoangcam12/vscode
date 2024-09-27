@@ -3,20 +3,22 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import 'vs/css!./toolbar';
-import * as nls from 'vs/nls';
-import { Action, IActionRunner, IAction, SubmenuAction } from 'vs/base/common/actions';
-import { ActionBar, ActionsOrientation, IActionViewItemProvider } from 'vs/base/browser/ui/actionbar/actionbar';
-import { ResolvedKeybinding } from 'vs/base/common/keyCodes';
-import { Disposable, DisposableStore } from 'vs/base/common/lifecycle';
-import { AnchorAlignment } from 'vs/base/browser/ui/contextview/contextview';
-import { withNullAsUndefined } from 'vs/base/common/types';
-import { Codicon, CSSIcon, registerCodicon } from 'vs/base/common/codicons';
-import { EventMultiplexer } from 'vs/base/common/event';
-import { DropdownMenuActionViewItem } from 'vs/base/browser/ui/dropdown/dropdownActionViewItem';
-import { IContextMenuProvider } from 'vs/base/browser/contextmenu';
+import { IContextMenuProvider } from '../../contextmenu.js';
+import { ActionBar, ActionsOrientation, IActionViewItemProvider } from '../actionbar/actionbar.js';
+import { AnchorAlignment } from '../contextview/contextview.js';
+import { DropdownMenuActionViewItem } from '../dropdown/dropdownActionViewItem.js';
+import { Action, IAction, IActionRunner, SubmenuAction } from '../../../common/actions.js';
+import { Codicon } from '../../../common/codicons.js';
+import { ThemeIcon } from '../../../common/themables.js';
+import { EventMultiplexer } from '../../../common/event.js';
+import { ResolvedKeybinding } from '../../../common/keybindings.js';
+import { Disposable, DisposableStore } from '../../../common/lifecycle.js';
+import './toolbar.css';
+import * as nls from '../../../../nls.js';
+import { IHoverDelegate } from '../hover/hoverDelegate.js';
+import { createInstantHoverDelegate } from '../hover/hoverDelegateFactory.js';
 
-const toolBarMoreIcon = registerCodicon('toolbar-more', Codicon.more);
+
 
 export interface IToolBarOptions {
 	orientation?: ActionsOrientation;
@@ -27,7 +29,25 @@ export interface IToolBarOptions {
 	toggleMenuTitle?: string;
 	anchorAlignmentProvider?: () => AnchorAlignment;
 	renderDropdownAsChildElement?: boolean;
-	moreIcon?: CSSIcon;
+	moreIcon?: ThemeIcon;
+	allowContextMenu?: boolean;
+	skipTelemetry?: boolean;
+	hoverDelegate?: IHoverDelegate;
+
+	/**
+	 * If true, toggled primary items are highlighted with a background color.
+	 */
+	highlightToggledItems?: boolean;
+
+	/**
+	 * Render action with icons (default: `true`)
+	 */
+	icon?: boolean;
+
+	/**
+	 * Render action with label (default: `false`)
+	 */
+	label?: boolean;
 }
 
 /**
@@ -35,23 +55,22 @@ export interface IToolBarOptions {
  */
 export class ToolBar extends Disposable {
 	private options: IToolBarOptions;
-	private actionBar: ActionBar;
+	protected readonly actionBar: ActionBar;
 	private toggleMenuAction: ToggleMenuAction;
 	private toggleMenuActionViewItem: DropdownMenuActionViewItem | undefined;
 	private submenuActionViewItems: DropdownMenuActionViewItem[] = [];
 	private hasSecondaryActions: boolean = false;
-	private lookupKeybindings: boolean;
-	private element: HTMLElement;
+	private readonly element: HTMLElement;
 
 	private _onDidChangeDropdownVisibility = this._register(new EventMultiplexer<boolean>());
 	readonly onDidChangeDropdownVisibility = this._onDidChangeDropdownVisibility.event;
-	private disposables = new DisposableStore();
+	private readonly disposables = this._register(new DisposableStore());
 
 	constructor(container: HTMLElement, contextMenuProvider: IContextMenuProvider, options: IToolBarOptions = { orientation: ActionsOrientation.HORIZONTAL }) {
 		super();
 
+		options.hoverDelegate = options.hoverDelegate ?? this._register(createInstantHoverDelegate());
 		this.options = options;
-		this.lookupKeybindings = typeof this.options.getKeyBinding === 'function';
 
 		this.toggleMenuAction = this._register(new ToggleMenuAction(() => this.toggleMenuActionViewItem?.show(), options.toggleMenuTitle));
 
@@ -63,7 +82,10 @@ export class ToolBar extends Disposable {
 			orientation: options.orientation,
 			ariaLabel: options.ariaLabel,
 			actionRunner: options.actionRunner,
-			actionViewItemProvider: (action: IAction) => {
+			allowContextMenu: options.allowContextMenu,
+			highlightToggledItems: options.highlightToggledItems,
+			hoverDelegate: options.hoverDelegate,
+			actionViewItemProvider: (action, viewItemOptions) => {
 				if (action.id === ToggleMenuAction.ID) {
 					this.toggleMenuActionViewItem = new DropdownMenuActionViewItem(
 						action,
@@ -73,9 +95,12 @@ export class ToolBar extends Disposable {
 							actionViewItemProvider: this.options.actionViewItemProvider,
 							actionRunner: this.actionRunner,
 							keybindingProvider: this.options.getKeyBinding,
-							classNames: CSSIcon.asClassNameArray(options.moreIcon ?? toolBarMoreIcon),
+							classNames: ThemeIcon.asClassNameArray(options.moreIcon ?? Codicon.toolBarMore),
 							anchorAlignmentProvider: this.options.anchorAlignmentProvider,
-							menuAsChild: !!this.options.renderDropdownAsChildElement
+							menuAsChild: !!this.options.renderDropdownAsChildElement,
+							skipTelemetry: this.options.skipTelemetry,
+							isMenu: true,
+							hoverDelegate: this.options.hoverDelegate
 						}
 					);
 					this.toggleMenuActionViewItem.setActionContext(this.actionBar.context);
@@ -85,7 +110,7 @@ export class ToolBar extends Disposable {
 				}
 
 				if (options.actionViewItemProvider) {
-					const result = options.actionViewItemProvider(action);
+					const result = options.actionViewItemProvider(action, viewItemOptions);
 
 					if (result) {
 						return result;
@@ -103,7 +128,9 @@ export class ToolBar extends Disposable {
 							keybindingProvider: this.options.getKeyBinding,
 							classNames: action.class,
 							anchorAlignmentProvider: this.options.anchorAlignmentProvider,
-							menuAsChild: true
+							menuAsChild: !!this.options.renderDropdownAsChildElement,
+							skipTelemetry: this.options.skipTelemetry,
+							hoverDelegate: this.options.hoverDelegate
 						}
 					);
 					result.setActionContext(this.actionBar.context);
@@ -128,9 +155,7 @@ export class ToolBar extends Disposable {
 
 	set context(context: unknown) {
 		this.actionBar.context = context;
-		if (this.toggleMenuActionViewItem) {
-			this.toggleMenuActionViewItem.setActionContext(context);
-		}
+		this.toggleMenuActionViewItem?.setActionContext(context);
 		for (const actionViewItem of this.submenuActionViewItems) {
 			actionViewItem.setActionContext(context);
 		}
@@ -138,6 +163,10 @@ export class ToolBar extends Disposable {
 
 	getElement(): HTMLElement {
 		return this.element;
+	}
+
+	focus(): void {
+		this.actionBar.focus();
 	}
 
 	getItemsWidth(): number {
@@ -148,6 +177,18 @@ export class ToolBar extends Disposable {
 		return itemsWidth;
 	}
 
+	getItemAction(indexOrElement: number | HTMLElement) {
+		return this.actionBar.getAction(indexOrElement);
+	}
+
+	getItemWidth(index: number): number {
+		return this.actionBar.getWidth(index);
+	}
+
+	getItemsLength(): number {
+		return this.actionBar.length();
+	}
+
 	setAriaLabel(label: string): void {
 		this.actionBar.setAriaLabel(label);
 	}
@@ -155,7 +196,7 @@ export class ToolBar extends Disposable {
 	setActions(primaryActions: ReadonlyArray<IAction>, secondaryActions?: ReadonlyArray<IAction>): void {
 		this.clear();
 
-		let primaryActionsToSet = primaryActions ? primaryActions.slice(0) : [];
+		const primaryActionsToSet = primaryActions ? primaryActions.slice(0) : [];
 
 		// Inject additional action to open secondary actions if present
 		this.hasSecondaryActions = !!(secondaryActions && secondaryActions.length > 0);
@@ -165,14 +206,18 @@ export class ToolBar extends Disposable {
 		}
 
 		primaryActionsToSet.forEach(action => {
-			this.actionBar.push(action, { icon: true, label: false, keybinding: this.getKeybindingLabel(action) });
+			this.actionBar.push(action, { icon: this.options.icon ?? true, label: this.options.label ?? false, keybinding: this.getKeybindingLabel(action) });
 		});
 	}
 
-	private getKeybindingLabel(action: IAction): string | undefined {
-		const key = this.lookupKeybindings ? this.options.getKeyBinding?.(action) : undefined;
+	isEmpty(): boolean {
+		return this.actionBar.isEmpty();
+	}
 
-		return withNullAsUndefined(key?.getLabel());
+	private getKeybindingLabel(action: IAction): string | undefined {
+		const key = this.options.getKeyBinding?.(action);
+
+		return key?.getLabel() ?? undefined;
 	}
 
 	private clear(): void {
@@ -183,11 +228,12 @@ export class ToolBar extends Disposable {
 
 	override dispose(): void {
 		this.clear();
+		this.disposables.dispose();
 		super.dispose();
 	}
 }
 
-class ToggleMenuAction extends Action {
+export class ToggleMenuAction extends Action {
 
 	static readonly ID = 'toolbar.toggle.more';
 
